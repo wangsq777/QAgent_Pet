@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000';
+const API_BASE = 'http://localhost:8080';
 
 const API = {
     async createSession(userId, petType) {

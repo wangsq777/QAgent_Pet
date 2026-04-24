@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router
 
@@ -27,7 +28,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:10000"],
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,6 +37,10 @@ app.add_middleware(
 
 app.include_router(sessions_router)
 app.include_router(chat_router)
+
+# 挂载静态文件目录
+frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
+app.mount("/frontend", StaticFiles(directory=frontend_path), name="frontend")
 
 
 @app.get("/")

@@ -70,7 +70,12 @@ class LLMService:
 
         messages = [{"role": "user", "content": prompt}]
         result = await self.chat(messages, temperature=1.0, max_tokens=100)
-        return result or self._get_fallback_welcome(pet_type)
+
+        # 检查返回内容是否合理（欢迎语应该在50字以内）
+        # 如果过长或为None，使用fallback
+        if not result or len(result) > 50:
+            return self._get_fallback_welcome(pet_type)
+        return result
 
     def _get_fallback_welcome(self, pet_type: str) -> str:
         fallbacks = {

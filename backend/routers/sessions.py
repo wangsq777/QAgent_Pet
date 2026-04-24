@@ -2,12 +2,23 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from backend.database import get_db
-from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse
+from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse
 from backend.services.llm_service import llm_service
 from backend.services.memory_service import memory_service
 from backend import prompts
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+def get_intimacy_level(intimacy: int) -> str:
+    if intimacy <= 20:
+        return "陌生"
+    elif intimacy <= 50:
+        return "熟悉"
+    elif intimacy <= 80:
+        return "亲密"
+    else:
+        return "挚友"
 
 
 @router.post("", response_model=SessionResponse)
@@ -112,11 +123,18 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
         proactive_message = None
         new_status = pet_status
 
+        # 默认回复
+        default_messages = {
+            "hot_dog": "汪！主人，我好想你呀！",
+            "cold_cat": "......哼。",
+            "mouse": "鼠鼠我啊......鼓起勇气来见主人了......"
+        }
+
         if request.mode == "next_day":
             if pet_type == "hot_dog":
                 proactive_content = await llm_service.generate_proactive_message(
                     pet_type, pet_info.PET_NAME, "主人已经1天没互动了，我很想念主人！"
-                )
+                ) or default_messages["hot_dog"]
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 
@@ -127,14 +145,14 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
                 else:
                     proactive_content = await llm_service.generate_proactive_message(
                         pet_type, pet_info.PET_NAME, "主人已经3天没互动了，我假装不在意但其实有点想主人。"
-                    )
+                    ) or default_messages["cold_cat"]
                     proactive_message = {"role": "assistant", "content": proactive_content}
                     await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 
             elif pet_type == "mouse":
                 proactive_content = await llm_service.generate_proactive_message(
                     pet_type, pet_info.PET_NAME, "主人已经2天没互动了，鼠鼠鼓起勇气打招呼。"
-                )
+                ) or default_messages["mouse"]
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 
@@ -150,7 +168,7 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
                 schedule_content = f"提醒：{schedule_dict['content']}（时间: {schedule_dict['scheduled_time']}）"
                 proactive_content = await llm_service.generate_proactive_message(
                     pet_type, pet_info.PET_NAME, schedule_content
-                )
+                ) or f"{pet_info.PET_NAME}提醒你：{schedule_dict['content']}"
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 
@@ -169,4 +187,42 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
             proactive_message=proactive_message,
             pet_status=new_status,
             schedule_reminder=None
+        )
+
+
+@router.get("/{session_id}/memory", response_model=MemoryPanelResponse)
+async def get_memory_panel(session_id: str):
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM pet_sessions WHERE session_id = ?",
+            (session_id,)
+        )
+        session = await cursor.fetchone()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session_dict = dict(session)
+        intimacy = session_dict["intimacy"]
+        total_chats = session_dict["total_chats"]
+
+        intimacy_level = get_intimacy_level(intimacy)
+
+        long_term_memories = await memory_service.get_long_term_memories(session_id)
+        recent_messages_count = await memory_service.get_message_count(session_id)
+
+        user_profile = await memory_service.get_user_profile(session_dict["user_id"]) or {}
+
+        return MemoryPanelResponse(
+            intimacy=intimacy,
+            intimacy_level=intimacy_level,
+            total_chats=total_chats,
+            long_term_memories=long_term_memories,
+            recent_messages_count=recent_messages_count,
+            user_profile={
+                "region": user_profile.get("region"),
+                "identity": user_profile.get("identity"),
+                "interests": user_profile.get("interests", "").split(",") if user_profile.get("interests") else [],
+                "extra_info": user_profile.get("extra_info")
+            }
         )

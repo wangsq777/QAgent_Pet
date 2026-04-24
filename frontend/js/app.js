@@ -18,7 +18,6 @@ class ChatApp {
         }
 
         this.renderPetInfo();
-        this.loadWelcomeMessage();
         this.loadHistoryMessages();
         this.bindEvents();
     }
@@ -40,10 +39,12 @@ class ChatApp {
             'mouse': '#fdcb6e'
         };
 
-        document.getElementById('pet-name').textContent = petNames[this.petType];
-        document.getElementById('pet-emoji').textContent = petEmojis[this.petType];
-        document.getElementById('pet-color').style.background = petColors[this.petType];
-        document.getElementById('pet-color').textContent = petNames[this.petType];
+        const petName = petNames[this.petType] || 'Hot Dog';
+        document.getElementById('pet-name').textContent = petName;
+        document.getElementById('pet-emoji').textContent = petEmojis[this.petType] || '🐕';
+        document.getElementById('pet-color').style.background = petColors[this.petType] || '#ff6b6b';
+        document.getElementById('pet-color').textContent = petName;
+        document.getElementById('header-pet-name').textContent = petName;
     }
 
     loadWelcomeMessage() {
@@ -60,13 +61,28 @@ class ChatApp {
     async loadHistoryMessages() {
         try {
             const response = await API.getMessages(this.sessionId);
+            // 检查历史消息中是否已有欢迎消息（由后端 create_session 保存的）
+            const hasWelcomeMsg = response.messages.some(
+                msg => msg.role === 'assistant' && msg.is_proactive
+            );
+
             response.messages.forEach(msg => {
                 if (msg.role !== 'system') {
                     this.addMessage(msg);
                 }
             });
+
+            // 如果历史消息中没有欢迎消息，才从 localStorage 显示
+            // 这样避免重复显示欢迎消息
+            if (!hasWelcomeMsg && this.welcomeMessage?.content) {
+                this.loadWelcomeMessage();
+            }
         } catch (error) {
             console.error('加载历史消息失败:', error);
+            // 加载失败时，直接显示欢迎消息
+            if (this.welcomeMessage?.content) {
+                this.loadWelcomeMessage();
+            }
         }
     }
 
