@@ -10,7 +10,6 @@ class LLMService:
         self.api_key = settings.LLM_API_KEY
         self.base_url = settings.LLM_BASE_URL
         self.model = settings.LLM_MODEL
-        self.backup_model = settings.LLM_MODEL_BACKUP
 
     def _clean_response(self, text: Optional[str]) -> Optional[str]:
         if not text:
@@ -18,8 +17,27 @@ class LLMService:
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'\[Think\].*?\[/Think\]', '', text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # 清理内部提示词泄露
+        text = re.sub(r'用户的消息是[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'用户要求我扮演.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'You are.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'The user asks[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'So we have a user.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        
+        # 清理 JSON 格式的思考内容
+        text = re.sub(r'\{[^{]*?"thought".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'\{[^{]*?"reasoning".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # 清理多余的空白字符
+        text = re.sub(r'\n{3,}', '\n\n', text)
         text = text.strip()
-        return text if text else None
+        
+        # 如果清理后内容过短或看起来不像正常回复，返回 None
+        if len(text) < 3 or text.startswith('LLM response:') or text.startswith('用户'):
+            return None
+            
+        return text
 
     async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int) -> Optional[str]:
         if not self.api_key:
@@ -56,18 +74,27 @@ class LLMService:
         temperature: float = 0.8,
         max_tokens: int = 500
     ) -> Optional[str]:
-        result = await self._call_llm(messages, self.model, temperature, max_tokens)
-        if result is None and self.backup_model:
-            print(f"Primary model failed, trying backup model: {self.backup_model}")
-            result = await self._call_llm(messages, self.backup_model, temperature, max_tokens)
-        return result
+        return await self._call_llm(messages, self.model, temperature, max_tokens)
 
     async def generate_welcome_message(self, pet_type: str, pet_name: str, pet_personality: str) -> str:
-        prompt = f"""你是 {pet_name}，{pet_personality}
+        # 根据宠物类型定制欢迎语 prompt
+        welcome_prompts = {
+            "hot_dog": f"""你是 {pet_name}，{pet_personality}
 请用你的性格风格，写一句简短的欢迎主人的话（30字以内）。
 你的口头禅是"汪！主人！"或类似风格的开场白。
+直接输出欢迎语，不要任何解释。""",
+            "cold_cat": f"""你是 {pet_name}，{pet_personality}
+请用傲娇的猫咪风格，写一句简短的欢迎主人的话（30字以内）。
+口头禅是"哼。......才不是关心你。"
+保持高冷但暗藏关心，简洁冷淡。
+直接输出欢迎语，不要任何解释。""",
+            "mouse": f"""你是 {pet_name}，{pet_personality}
+请用胆怯但真诚的小老鼠风格，写一句简短的欢迎主人的话（30字以内）。
+可以带"鼠鼠我啊..."这样的开场。
 直接输出欢迎语，不要任何解释。"""
+        }
 
+        prompt = welcome_prompts.get(pet_type, welcome_prompts["hot_dog"])
         messages = [{"role": "user", "content": prompt}]
         result = await self.chat(messages, temperature=1.0, max_tokens=100)
 
@@ -115,11 +142,16 @@ class LLMService:
 
         messages = [{"role": "user", "content": prompt}]
         result = await self.chat(messages, temperature=0.3, max_tokens=100)
+        print(f"[DEBUG] extract_schedule raw result: {result}")  # 添加日志
         if result and result.strip() != "None":
             try:
-                return json.loads(result)
-            except:
+                schedule = json.loads(result)
+                print(f"[DEBUG] Schedule extracted: {schedule}")  # 添加日志
+                return schedule
+            except Exception as e:
+                print(f"[DEBUG] Schedule parse failed: {e}")  # 添加日志
                 return None
+        print("[DEBUG] No schedule in message")
         return None
 
     async def compress_memory(self, messages: List[Dict[str, str]], pet_name: str) -> str:

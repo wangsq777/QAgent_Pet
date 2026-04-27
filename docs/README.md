@@ -159,8 +159,7 @@ QAgent_Pet/
 # LLM 配置
 LLM_API_KEY=your_api_key_here
 LLM_BASE_URL=https://api.minimax.chat/v1
-LLM_MODEL=MiniMax-Text-01
-LLM_MODEL_BACKUP=MiniMax-Text-01-Turbo
+LLM_MODEL=MiniMax-M2.5
 
 # 天气 API（可选）
 WEATHER_API_KEY=

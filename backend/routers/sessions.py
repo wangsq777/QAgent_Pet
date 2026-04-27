@@ -159,7 +159,28 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
         }
 
         if request.mode == "next_day":
-            if pet_type == "hot_dog":
+            # 首先检查是否有待触发的日程
+            cursor = await db.execute(
+                "SELECT * FROM schedules WHERE session_id = ? AND is_triggered = 0 ORDER BY scheduled_time LIMIT 1",
+                (session_id,)
+            )
+            schedule = await cursor.fetchone()
+            
+            if schedule:
+                # 有日程，优先提醒日程
+                schedule_dict = dict(schedule)
+                schedule_content = f"提醒：{schedule_dict['content']}（时间: {schedule_dict['scheduled_time']}）"
+                proactive_content = await llm_service.generate_proactive_message(
+                    pet_type, pet_info.PET_NAME, schedule_content
+                ) or f"{pet_info.PET_NAME}提醒你：{schedule_dict['content']}"
+                proactive_message = {"role": "assistant", "content": proactive_content}
+                await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
+                
+                await db.execute(
+                    "UPDATE schedules SET is_triggered = 1 WHERE schedule_id = ?",
+                    (schedule_dict["schedule_id"],)
+                )
+            elif pet_type == "hot_dog":
                 proactive_content = await llm_service.generate_proactive_message(
                     pet_type, pet_info.PET_NAME, "主人已经1天没互动了，我很想念主人！"
                 ) or default_messages["hot_dog"]

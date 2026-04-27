@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
@@ -120,21 +121,6 @@ async def chat(session_id: str, request: ChatRequest):
 
     await memory_service.save_message(session_id, "user", request.content)
 
-    emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
-
-    schedule_extracted = await llm_service.extract_schedule(request.content)
-    if schedule_extracted:
-        schedule_id = str(uuid.uuid4())
-        async with get_db() as db:
-            await db.execute(
-                """
-                INSERT INTO schedules (schedule_id, session_id, content, scheduled_time, is_triggered, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (schedule_id, session_id, schedule_extracted["content"], schedule_extracted["scheduled_time"], 0, datetime.now())
-            )
-            await db.commit()
-
     context = await build_context(session_id, pet_type)
 
     full_prompt = f"""<system>
@@ -163,7 +149,13 @@ async def chat(session_id: str, request: ChatRequest):
 主人: {request.content}
 </conversation>
 
-请用{pet_type}的性格风格回复主人的消息，直接输出回复内容，不要任何解释。"""
+【工具说明】
+如果用户的消息包含日程安排（如约定时间、待办事项等），请在回复末尾添加日程标记：
+[SCHEDULE: 日程内容 | YYYY-MM-DD HH:MM]
+例如：用户说"明天十点开会"，回复末尾加上 [SCHEDULE: 开会 | 2026-04-28 10:00]
+如果没有日程，不要添加任何标记。
+
+请用{pet_type}的性格风格回复，直接输出回复内容。"""
 
     reply = await llm_service.chat([{"role": "user", "content": full_prompt}])
     if not reply:
@@ -173,6 +165,34 @@ async def chat(session_id: str, request: ChatRequest):
             "mouse": "鼠鼠我啊......突然不知道怎么回答了......"
         }
         reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
+
+    # 解析日程标记
+    schedule_extracted = None
+    schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\]'
+    match = re.search(schedule_pattern, reply)
+    if match:
+        schedule_extracted = {
+            "content": match.group(1).strip(),
+            "scheduled_time": match.group(2).strip()
+        }
+        reply = re.sub(schedule_pattern, '', reply).strip()  # 移除标记，只保留回复内容
+
+    # 保存日程到数据库
+    if schedule_extracted:
+        schedule_id = str(uuid.uuid4())
+        async with get_db() as db:
+            await db.execute(
+                """
+                INSERT INTO schedules (schedule_id, session_id, content, scheduled_time, is_triggered, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (schedule_id, session_id, schedule_extracted["content"], schedule_extracted["scheduled_time"], 0, datetime.now())
+            )
+            await db.commit()
+        print(f"[DEBUG] Schedule saved: {schedule_extracted}")
+
+    # 继续原有的情绪提取（不再调用 extract_schedule）
+    emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
 
     await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
 
