@@ -17,8 +17,9 @@ class SessionCreateRequest(BaseModel):
 class SessionResponse(BaseModel):
     session_id: str
     pet_type: str
-    welcome_message: dict
+    welcome_message: Optional[dict] = None
     intimacy: int
+    is_existing: bool = False
 
 
 class ChatRequest(BaseModel):

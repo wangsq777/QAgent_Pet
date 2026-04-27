@@ -23,12 +23,40 @@ def get_intimacy_level(intimacy: int) -> str:
 
 @router.post("", response_model=SessionResponse)
 async def create_session(request: SessionCreateRequest):
-    session_id = str(uuid.uuid4())
     user_id = request.user_id
     pet_type = request.pet_type
 
     if pet_type not in ["hot_dog", "cold_cat", "mouse"]:
         raise HTTPException(status_code=400, detail="Invalid pet type")
+
+    async with get_db() as db:
+        # 查找该用户是否已有该宠物的 session
+        cursor = await db.execute(
+            "SELECT session_id FROM pet_sessions WHERE user_id = ? AND pet_type = ?",
+            (user_id, pet_type)
+        )
+        existing = await cursor.fetchone()
+
+        if existing:
+            # 复用已有 session，直接返回欢迎消息（不重新生成）
+            session_id = existing[0]
+            cursor = await db.execute(
+                "SELECT intimacy FROM pet_sessions WHERE session_id = ?",
+                (session_id,)
+            )
+            session = await cursor.fetchone()
+            intimacy = session[0] if session else 0
+
+            return SessionResponse(
+                session_id=session_id,
+                pet_type=pet_type,
+                welcome_message=None,  # 已有session不返回欢迎语
+                intimacy=intimacy,
+                is_existing=True  # 标记为已有session
+            )
+
+        # 创建新 session
+        session_id = str(uuid.uuid4())
 
     async with get_db() as db:
         user_row = await db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))

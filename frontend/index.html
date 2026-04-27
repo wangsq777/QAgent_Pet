@@ -64,9 +64,10 @@
                 const response = await API.createSession(userId, petType);
                 localStorage.setItem('qagent_session_id', response.session_id);
                 localStorage.setItem('qagent_pet_type', response.pet_type);
-                localStorage.setItem('qagent_welcome', JSON.stringify(response.welcome_message));
+                // 如果是已有session，不保存欢迎语；新session才保存
+                localStorage.setItem('qagent_welcome', JSON.stringify(response.welcome_message || {}));
                 localStorage.setItem('qagent_intimacy', response.intimacy);
-                
+
                 window.location.href = 'chat.html';
             } catch (error) {
                 alert('创建会话失败，请重试: ' + error.message);
