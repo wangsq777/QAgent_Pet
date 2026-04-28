@@ -28,10 +28,10 @@ class ChatApp {
             'cold_cat': 'Cold Cat',
             'mouse': '鼠鼠'
         };
-        const petEmojis = {
-            'hot_dog': '🐕',
-            'cold_cat': '🐱',
-            'mouse': '🐭'
+        const petImages = {
+            'hot_dog': 'images/hot_dog.png',
+            'cold_cat': 'images/cold_cat.png',
+            'mouse': 'images/mouse.png'
         };
         const petColors = {
             'hot_dog': '#ff6b6b',
@@ -40,8 +40,15 @@ class ChatApp {
         };
 
         const petName = petNames[this.petType] || 'Hot Dog';
+        const petImage = petImages[this.petType] || 'images/hot_dog.png';
+        
+        // 设置宠物名称
         document.getElementById('pet-name').textContent = petName;
-        document.getElementById('pet-emoji').textContent = petEmojis[this.petType] || '🐕';
+        
+        // 设置宠物图片（替换 emoji）
+        const petEmojiEl = document.getElementById('pet-emoji');
+        petEmojiEl.innerHTML = `<img src="${petImage}" alt="${petName}" class="pet-avatar-img">`;
+        
         document.getElementById('pet-color').style.background = petColors[this.petType] || '#ff6b6b';
         document.getElementById('pet-color').textContent = petName;
         document.getElementById('header-pet-name').textContent = petName;
@@ -115,8 +122,16 @@ class ChatApp {
 
         const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         
+        // 获取宠物图片路径
+        const petImages = {
+            'hot_dog': 'images/hot_dog.png',
+            'cold_cat': 'images/cold_cat.png',
+            'mouse': 'images/mouse.png'
+        };
+        const petImage = petImages[this.petType] || 'images/hot_dog.png';
+        
         msgDiv.innerHTML = `
-            ${!isUser ? `<div class="pet-avatar">${document.getElementById('pet-emoji').textContent}</div>` : ''}
+            ${!isUser ? `<div class="pet-avatar"><img src="${petImage}" alt="宠物" class="pet-avatar-img"></div>` : ''}
             <div class="message-content">
                 ${msg.is_proactive && !isUser ? '<span class="proactive-tag">主动关怀</span>' : ''}
                 <p>${this.escapeHtml(msg.content)}</p>

@@ -113,6 +113,14 @@ body {
     display: block;
 }
 
+.pet-emoji.pet-avatar-img,
+.pet-card .pet-emoji {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
 .pet-name {
     font-size: 1.8rem;
     font-weight: 700;

@@ -166,9 +166,9 @@ async def chat(session_id: str, request: ChatRequest):
         }
         reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
 
-    # 解析日程标记
+    # 解析日程标记（支持有/无时间的情况）
     schedule_extracted = None
-    schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\]'
+    schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2})?\]'
     match = re.search(schedule_pattern, reply)
     if match:
         schedule_extracted = {

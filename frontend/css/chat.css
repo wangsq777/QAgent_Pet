@@ -80,6 +80,21 @@ body {
     margin-bottom: 10px;
 }
 
+.pet-avatar-large .pet-avatar-img,
+.pet-avatar-img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.pet-avatar .pet-avatar-img {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
 #pet-name {
     font-size: 1.5rem;
     color: var(--text-primary);
