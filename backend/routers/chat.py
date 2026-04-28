@@ -6,9 +6,14 @@ from backend.database import get_db
 from backend.schemas import ChatRequest, ChatResponse, MessageListResponse
 from backend.services.llm_service import llm_service
 from backend.services.memory_service import memory_service
+from backend.services.weather_service import weather_service
+from backend.services.tool_executor import tool_executor
 from backend import prompts
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
+
+# 注册工具
+tool_executor.register("query_weather", weather_service.query_weather_tool)
 
 
 def get_intimacy_level(intimacy: int) -> str:
@@ -55,7 +60,7 @@ async def build_context(session_id: str, pet_type: str) -> dict:
 
         short_term_messages = await memory_service.get_short_term_messages(session_id, limit=40)
         conversation_text = "\n".join([
-            f"{'主人' if m['role'] == 'user' else pet_info.PET_NAME}: {m['content']}"
+            f"{'主人' if m.role == 'user' else pet_info.PET_NAME}: {m.content}"
             for m in short_term_messages
         ])
 
@@ -72,6 +77,75 @@ async def build_context(session_id: str, pet_type: str) -> dict:
         }
 
         return context
+
+
+async def execute_tools_and_build_final_prompt(
+    reply: str, 
+    original_prompt: str, 
+    pet_type: str
+) -> tuple[str, dict]:
+    """
+    解析并执行 LLM 返回的工具调用，然后将工具结果反馈给 LLM 生成最终回复
+    
+    返回: (最终回复, 工具结果字典)
+    """
+    tool_calls = tool_executor.parse_tool_calls(reply)
+    
+    if not tool_calls:
+        return reply, {}
+    
+    # 执行所有工具调用
+    tool_results = {}
+    for call in tool_calls:
+        tool_name = call['tool']
+        args = call['args']
+        print(f"[Tool] 调用工具: {tool_name}, 参数: {args}")
+        
+        result = await tool_executor.execute(tool_name, args)
+        if result.success:
+            tool_results[tool_name] = result.result
+            print(f"[Tool] {tool_name} 执行成功: {result.result}")
+        else:
+            tool_results[tool_name] = f"错误: {result.error}"
+            print(f"[Tool] {tool_name} 执行失败: {result.error}")
+    
+    # 构建工具结果反馈 prompt
+    tool_results_text = "\n".join([
+        f"- {name}: {result}" for name, result in tool_results.items()
+    ])
+    
+    # 清理回复中的工具调用部分
+    cleaned_reply = tool_executor.remove_tool_calls(reply)
+    
+    # 始终将工具结果反馈给 LLM 生成最终回复（无论原始回复是否有文本）
+    second_prompt = f"""{original_prompt}
+
+【工具执行结果】
+{tool_results_text}
+
+请根据以上工具执行结果，用{pet_type}的性格风格回复。
+原始回复中可能已包含一些文字，你可以在此基础上结合工具结果完善回复。
+请直接输出最终回复内容，不要重复工具调用格式。"""
+    
+    final_reply = await llm_service.chat([{"role": "user", "content": second_prompt}])
+    
+    # 如果 LLM 生成回复成功，返回结果
+    if final_reply:
+        return final_reply, tool_results
+    
+    # LLM 调用失败时，生成包含工具结果的 fallback 回复
+    if tool_results:
+        # 从工具结果中提取关键信息
+        weather_info = tool_results.get("query_weather", "")
+        fallback_replys = {
+            "hot_dog": f"汪汪！帮你查到了：{weather_info}",
+            "cold_cat": f"哼...{weather_info}",
+            "mouse": f"鼠鼠查到啦：{weather_info}"
+        }
+        return fallback_replys.get(pet_type, f"查询结果：{weather_info}"), tool_results
+    
+    # 没有工具结果时使用原始回复
+    return cleaned_reply or reply, tool_results
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
@@ -122,10 +196,34 @@ async def chat(session_id: str, request: ChatRequest):
     await memory_service.save_message(session_id, "user", request.content)
 
     context = await build_context(session_id, pet_type)
+    
+    # 获取用户画像中的地区（作为备用提示给 Agent）
+    user_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
+    saved_region = user_profile.get("region") if user_profile else None
+
+    # 构建位置提示 - 让 LLM Agent 自己从对话中识别城市
+    if saved_region:
+        location_hint = f"（根据历史记录，用户可能在 {saved_region}）"
+    else:
+        location_hint = "（暂无用户位置信息）"
+
+    skills_section = f"""{context['skills']}
+
+【可用工具】
+- query_weather: 查询天气
+  用法: 当用户询问天气且你知道用户所在城市时调用
+  参数: location (城市名，支持全球城市，如"北京"、"东京"、"纽约"等)
+
+【重要】
+Agent 需要自主从用户消息中识别位置信息：
+- 如果用户提到城市名（如"我在苏州"、"去北京"），请记住这个位置
+- 如果用户询问天气但你不知道在哪，请先询问用户
+{location_hint}
+"""
 
     full_prompt = f"""<system>
 {context['system_prompt']}
-</system>
+:</system>
 
 <long_term_memory>
 {context['long_term_memory']}
@@ -140,7 +238,7 @@ async def chat(session_id: str, request: ChatRequest):
 </intimacy>
 
 <skills>
-{context['skills']}
+{skills_section}
 </skills>
 
 <conversation>
@@ -149,11 +247,19 @@ async def chat(session_id: str, request: ChatRequest):
 主人: {request.content}
 </conversation>
 
-【工具说明】
-如果用户的消息包含日程安排（如约定时间、待办事项等），请在回复末尾添加日程标记：
-[SCHEDULE: 日程内容 | YYYY-MM-DD HH:MM]
-例如：用户说"明天十点开会"，回复末尾加上 [SCHEDULE: 开会 | 2026-04-28 10:00]
-如果没有日程，不要添加任何标记。
+【重要规则】
+1. 如果用户询问天气，你需要知道用户在哪：
+   - 如果 <skills> 中显示"用户地区: 未知"，请先询问用户所在城市
+   - 如果用户指定了地点，使用用户指定的地点
+   - 如果有已知地区，使用已知地区
+2. 只有在知道用户所在城市后才能调用 query_weather 工具
+3. 如果需要调用工具，请在回复中包含：
+   [TOOL_CALL]
+   {{"tool": "query_weather", "args": {{"location": "城市名"}}}}
+   [/TOOL_CALL]
+4. 如果用户的消息包含日程安排，在回复末尾添加：[SCHEDULE: 日程内容 | YYYY-MM-DD HH:MM]
+5. 如果没有日程或不需要工具，不要添加任何标记
+6. 调用工具后，系统会返回工具执行结果，请根据结果回复用户
 
 请用{pet_type}的性格风格回复，直接输出回复内容。"""
 
@@ -165,8 +271,13 @@ async def chat(session_id: str, request: ChatRequest):
             "mouse": "鼠鼠我啊......突然不知道怎么回答了......"
         }
         reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
+    
+    # 执行工具调用并生成最终回复（ReAct 模式）
+    reply, tool_results = await execute_tools_and_build_final_prompt(
+        reply, full_prompt, pet_type
+    )
 
-    # 解析日程标记（支持有/无时间的情况）
+    # 解析日程标记
     schedule_extracted = None
     schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2})?\]'
     match = re.search(schedule_pattern, reply)
@@ -175,9 +286,9 @@ async def chat(session_id: str, request: ChatRequest):
             "content": match.group(1).strip(),
             "scheduled_time": match.group(2).strip()
         }
-        reply = re.sub(schedule_pattern, '', reply).strip()  # 移除标记，只保留回复内容
+        reply = re.sub(schedule_pattern, '', reply).strip()
 
-    # 保存日程到数据库
+    # 保存日程
     if schedule_extracted:
         schedule_id = str(uuid.uuid4())
         async with get_db() as db:
@@ -191,7 +302,6 @@ async def chat(session_id: str, request: ChatRequest):
             await db.commit()
         print(f"[DEBUG] Schedule saved: {schedule_extracted}")
 
-    # 继续原有的情绪提取（不再调用 extract_schedule）
     emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
 
     await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)

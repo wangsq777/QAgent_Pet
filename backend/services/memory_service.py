@@ -2,10 +2,11 @@ import uuid
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from backend.database import get_db
+from backend.schemas import MessageResponse
 
 
 class MemoryService:
-    async def get_short_term_messages(self, session_id: str, limit: int = 40) -> List[Dict]:
+    async def get_short_term_messages(self, session_id: str, limit: int = 40) -> List[MessageResponse]:
         async with get_db() as db:
             cursor = await db.execute(
                 """
@@ -18,7 +19,7 @@ class MemoryService:
                 (session_id, limit)
             )
             rows = await cursor.fetchall()
-            return [dict(row) for row in reversed(rows)]
+            return [MessageResponse(**dict(row)) for row in reversed(rows)]
 
     async def save_message(
         self,
@@ -52,14 +53,14 @@ class MemoryService:
     async def compress_to_long_term(
         self,
         session_id: str,
-        messages: List[Dict],
+        messages: List,
         pet_name: str
     ) -> Optional[str]:
         from backend.services.llm_service import llm_service
         
         memory_id = str(uuid.uuid4())
         conversation_for_compress = [
-            {"role": m["role"], "content": m["content"]}
+            {"role": getattr(m, "role", m.get("role")), "content": getattr(m, "content", m.get("content"))}
             for m in messages[:20]
         ]
         
