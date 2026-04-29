@@ -124,6 +124,110 @@ async def get_session(session_id: str):
         return dict(session)
 
 
+async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
+    """生成宠物分享日常的消息"""
+    daily_topics = {
+        "hot_dog": [
+            "主人不在的时候，汪汪把玩具球玩了一整天呢！",
+            "今天发现了一个超好玩的蝴蝶，汪汪追了它好久！",
+            "汪汪把最喜欢的狗窝整理了一下，现在超级舒服～",
+            "门口的小松鼠又来了，汪汪和它聊了一会儿天！",
+            "汪汪今天学会了新技能！主人回来要夸夸汪汪哦！"
+        ],
+        "cold_cat": [
+            "......今天阳光很好，本喵晒了一会儿太阳。",
+            "哼，那个逗猫棒被本喵成功捕获了。（才不是开心）",
+            "邻居的猫又来挑衅了，本喵懒得理它。",
+            "本喵今天睡了一个很舒服的午觉......才不是在等你。",
+            "窗外的鸟好吵，本喵决定无视它们。"
+        ],
+        "mouse": [
+            "鼠鼠今天找到了一颗超级好吃的瓜子！",
+            "鼠鼠把窝重新装修了一下，现在暖暖的～",
+            "鼠鼠鼓起勇气去探索了一下厨房，发现了好多新奇的东西！",
+            "今天鼠鼠学会了新舞步，想跳给主人看！",
+            "鼠鼠偷偷藏了一些好吃的，想和主人一起分享～"
+        ]
+    }
+    
+    import random
+    topic = random.choice(daily_topics.get(pet_type, daily_topics["hot_dog"]))
+    
+    # 用 LLM 生成更自然的表达
+    llm_content = await llm_service.generate_proactive_message(
+        pet_type, pet_name, f"分享日常生活：{topic}"
+    )
+    
+    if llm_content:
+        return llm_content
+    
+    # Fallback：直接返回话题
+    prefixes = {
+        "hot_dog": "汪汪！告诉主人一个好消息！",
+        "cold_cat": "......有个事情。",
+        "mouse": "鼠鼠有话想和主人说......"
+    }
+    return f"{prefixes.get(pet_type, '')}{topic}"
+
+
+@router.post("/{session_id}/share-daily")
+async def share_daily(session_id: str):
+    """
+    分享日常 API
+    - 前端调用：用户打开页面时概率触发（随机数整除3）
+    - 内部调用：模拟隔天后必定触发
+    """
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM pet_sessions WHERE session_id = ?",
+            (session_id,)
+        )
+        session = await cursor.fetchone()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session_dict = dict(session)
+        pet_type = session_dict["pet_type"]
+        pet_status = session_dict["pet_status"]
+
+        # 如果宠物在躲藏状态，不分享日常
+        if pet_status == "hiding":
+            return {"message": None, "reason": "pet_hiding"}
+
+        pet_prompts = {
+            "hot_dog": prompts.hot_dog,
+            "cold_cat": prompts.cold_cat,
+            "mouse": prompts.mouse
+        }
+        pet_info = pet_prompts.get(pet_type)
+
+        # 生成日常分享消息
+        daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+        
+        # 保存消息
+        await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
+        
+        return {"message": {"role": "assistant", "content": daily_content}}
+
+
+@router.post("/{session_id}/share-daily-random")
+async def share_daily_random(session_id: str):
+    """
+    概率触发分享日常
+    生成随机数，如果能整除3（约33%概率），则分享日常
+    """
+    import random
+    rand_num = random.randint(1, 100)
+    
+    if rand_num % 3 == 0:
+        # 触发分享日常
+        result = await share_daily(session_id)
+        return {"triggered": True, **result}
+    else:
+        return {"triggered": False, "message": None}
+
+
 @router.post("/{session_id}/simulate-time", response_model=SimulateTimeResponse)
 async def simulate_time(session_id: str, request: SimulateTimeRequest):
     async with get_db() as db:
@@ -206,6 +310,12 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
                 ) or default_messages["mouse"]
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
+            
+            # 模拟隔天后必定分享日常（即使宠物没有主动发消息）
+            if pet_status != "hiding" and proactive_message is None:
+                daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+                proactive_message = {"role": "assistant", "content": daily_content}
+                await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
 
         elif request.mode == "schedule_trigger":
             cursor = await db.execute(

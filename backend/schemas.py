@@ -33,6 +33,7 @@ class ChatResponse(BaseModel):
     total_chats: int
     schedule_extracted: Optional[dict] = None
     memory_compressed: bool = False
+    daily_share: Optional[dict] = None  # 日常分享消息（约33%概率触发）
 
 
 class MessageResponse(BaseModel):

@@ -33,6 +33,53 @@ def calculate_intimacy_change(emotion_tag: str) -> int:
     return 1
 
 
+async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
+    """生成宠物分享日常的消息"""
+    import random
+    
+    daily_topics = {
+        "hot_dog": [
+            "主人不在的时候，汪汪把玩具球玩了一整天呢！",
+            "今天发现了一个超好玩的蝴蝶，汪汪追了它好久！",
+            "汪汪把最喜欢的狗窝整理了一下，现在超级舒服～",
+            "门口的小松鼠又来了，汪汪和它聊了一会儿天！",
+            "汪汪今天学会了新技能！主人回来要夸夸汪汪哦！"
+        ],
+        "cold_cat": [
+            "......今天阳光很好，本喵晒了一会儿太阳。",
+            "哼，那个逗猫棒被本喵成功捕获了。（才不是开心）",
+            "邻居的猫又来挑衅了，本喵懒得理它。",
+            "本喵今天睡了一个很舒服的午觉......才不是在等你。",
+            "窗外的鸟好吵，本喵决定无视它们。"
+        ],
+        "mouse": [
+            "鼠鼠今天找到了一颗超级好吃的瓜子！",
+            "鼠鼠把窝重新装修了一下，现在暖暖的～",
+            "鼠鼠鼓起勇气去探索了一下厨房，发现了好多新奇的东西！",
+            "今天鼠鼠学会了新舞步，想跳给主人看！",
+            "鼠鼠偷偷藏了一些好吃的，想和主人一起分享～"
+        ]
+    }
+    
+    topic = random.choice(daily_topics.get(pet_type, daily_topics["hot_dog"]))
+    
+    # 用 LLM 生成更自然的表达
+    llm_content = await llm_service.generate_proactive_message(
+        pet_type, pet_name, f"分享日常生活：{topic}"
+    )
+    
+    if llm_content:
+        return llm_content
+    
+    # Fallback：直接返回话题
+    prefixes = {
+        "hot_dog": "汪汪！告诉主人一个好消息！",
+        "cold_cat": "......有个事情。",
+        "mouse": "鼠鼠有话想和主人说......"
+    }
+    return f"{prefixes.get(pet_type, '')}{topic}"
+
+
 async def build_context(session_id: str, pet_type: str) -> dict:
     async with get_db() as db:
         cursor = await db.execute(
@@ -181,16 +228,29 @@ async def chat(session_id: str, request: ChatRequest):
                 )
                 session_dict["pet_status"] = "normal"
 
+        # 提前获取 pet_info（懒说话分支需要用到）
+        _pet_prompts = {"hot_dog": prompts.hot_dog, "cold_cat": prompts.cold_cat, "mouse": prompts.mouse}
+        pet_info = _pet_prompts.get(pet_type)
+
         if pet_type == "cold_cat" and session_dict["total_chats"] > 0:
             import random
             if random.random() < 0.3:
+                # 懒说话时仍需检查是否需要分享日常
+                daily_share = None
+                if random.randint(1, 100) % 3 == 0:
+                    daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+                    await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
+                    daily_share = {"role": "assistant", "content": daily_content}
+                    print(f"[DEBUG] Daily share triggered (cold_cat lazy): {daily_content}")
+                
                 return ChatResponse(
                     reply="......",
                     emotion_tag="neutral",
                     intimacy=session_dict["intimacy"],
                     total_chats=session_dict["total_chats"],
                     schedule_extracted=None,
-                    memory_compressed=False
+                    memory_compressed=False,
+                    daily_share=daily_share
                 )
 
     await memory_service.save_message(session_id, "user", request.content)
@@ -325,6 +385,18 @@ Agent 需要自主从用户消息中识别位置信息：
             (new_intimacy, new_total_chats, datetime.now(), datetime.now(), session_id)
         )
         await db.commit()
+    
+    # 随机分享日常（约33%概率）
+    daily_share = None
+    pet_prompts = {"hot_dog": prompts.hot_dog, "cold_cat": prompts.cold_cat, "mouse": prompts.mouse}
+    pet_info = pet_prompts.get(pet_type)
+    
+    import random
+    if random.randint(1, 100) % 3 == 0 and session_dict.get("pet_status") != "hiding":
+        daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+        await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
+        daily_share = {"role": "assistant", "content": daily_content}
+        print(f"[DEBUG] Daily share triggered: {daily_content}")
 
     return ChatResponse(
         reply=reply,
@@ -332,7 +404,8 @@ Agent 需要自主从用户消息中识别位置信息：
         intimacy=new_intimacy,
         total_chats=new_total_chats,
         schedule_extracted=schedule_extracted,
-        memory_compressed=memory_compressed
+        memory_compressed=memory_compressed,
+        daily_share=daily_share
     )
 
 

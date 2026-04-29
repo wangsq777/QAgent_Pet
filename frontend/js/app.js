@@ -171,6 +171,16 @@ class ChatApp {
                 created_at: new Date().toISOString()
             });
 
+            // 处理日常分享消息
+            if (response.daily_share) {
+                this.addMessage({
+                    role: 'assistant',
+                    content: response.daily_share.content,
+                    is_proactive: true,
+                    created_at: new Date().toISOString()
+                });
+            }
+
             this.updateIntimacy(response.intimacy);
             this.updateTotalChats(response.total_chats);
 
