@@ -67,7 +67,18 @@ class ChatApp {
 
     async loadHistoryMessages() {
         try {
-            const response = await API.getMessages(this.sessionId);
+            // 同时获取消息、会话详情、记忆面板以同步所有数据
+            const [messagesResponse, sessionResponse, memoryData] = await Promise.all([
+                API.getMessages(this.sessionId),
+                API.getSession(this.sessionId),
+                API.getMemoryPanel(this.sessionId)
+            ]);
+            
+            // 从后端同步亲密度和累计对话到侧边栏
+            this.updateIntimacy(sessionResponse.intimacy);
+            this.updateTotalChats(memoryData.total_chats);
+            
+            const response = messagesResponse;
             // 检查历史消息中是否已有欢迎消息（由后端 create_session 保存的）
             const hasWelcomeMsg = response.messages.some(
                 msg => msg.role === 'assistant' && msg.is_proactive
@@ -286,8 +297,103 @@ class ChatApp {
             document.getElementById('panel-intimacy').textContent = data.intimacy;
             document.getElementById('panel-intimacy-level').textContent = data.intimacy_level;
             document.getElementById('panel-total-chats').textContent = data.total_chats;
+            
+            // 加载用户画像，确保空值/null显示为"未知"
+            const profile = data.user_profile || {};
+            const region = (!profile.region || profile.region === '') ? '未知' : profile.region;
+            const identity = (!profile.identity || profile.identity === '') ? '未知' : profile.identity;
+            const interests = (profile.interests && profile.interests.length > 0) 
+                ? profile.interests.join('、') 
+                : '未知';
+            
+            document.getElementById('profile-region').textContent = region;
+            document.getElementById('profile-identity').textContent = identity;
+            document.getElementById('profile-interests').textContent = interests;
         } catch (error) {
             console.error('加载记忆面板失败:', error);
+        }
+    }
+
+    editProfile(field) {
+        const valueEl = document.getElementById(`profile-${field}`);
+        const actionsEl = document.getElementById(`actions-${field}`);
+        const currentValue = valueEl.textContent;
+        
+        const fieldLabels = {
+            'region': '地区',
+            'identity': '身份',
+            'interests': '兴趣'
+        };
+        
+        // 保存原始值用于取消
+        valueEl.dataset.original = currentValue;
+        
+        // 替换显示值为输入框
+        valueEl.innerHTML = `<input type="text" class="profile-inline-input" id="input-${field}" value="${currentValue === '未知' ? '' : currentValue}">`;
+        
+        // 替换编辑按钮为保存/取消按钮
+        actionsEl.innerHTML = `
+            <button class="save-btn" onclick="chatApp.saveProfile('${field}')">✓</button>
+            <button class="cancel-btn" onclick="chatApp.cancelEdit('${field}')">✕</button>
+        `;
+        
+        // 自动聚焦输入框
+        const input = document.getElementById(`input-${field}`);
+        input.focus();
+        input.select();
+    }
+    
+    cancelEdit(field) {
+        const valueEl = document.getElementById(`profile-${field}`);
+        const actionsEl = document.getElementById(`actions-${field}`);
+        
+        // 恢复原始值
+        valueEl.textContent = valueEl.dataset.original || '未知';
+        
+        // 恢复编辑按钮
+        actionsEl.innerHTML = `<button class="edit-btn" onclick="chatApp.editProfile('${field}')">✏️</button>`;
+    }
+
+    async saveProfile(field) {
+        const input = document.getElementById(`input-${field}`);
+        const value = input.value.trim();
+        
+        // 空内容保存为"未知"
+        const finalValue = value || '未知';
+        
+        const valueEl = document.getElementById(`profile-${field}`);
+        const actionsEl = document.getElementById(`actions-${field}`);
+        
+        try {
+            const currentProfile = {
+                region: document.getElementById('profile-region').textContent,
+                identity: document.getElementById('profile-identity').textContent,
+                interests: document.getElementById('profile-interests').textContent,
+                extra_info: null
+            };
+            
+            if (field === 'region') currentProfile.region = finalValue;
+            else if (field === 'identity') currentProfile.identity = finalValue;
+            else if (field === 'interests') currentProfile.interests = finalValue;
+            
+            console.log('保存用户画像:', currentProfile);
+            
+            await API.updateUserProfile(this.sessionId, currentProfile);
+            
+            // 更新显示值
+            valueEl.textContent = finalValue;
+            delete valueEl.dataset.original;
+            
+            // 恢复编辑按钮
+            actionsEl.innerHTML = `<button class="edit-btn" onclick="chatApp.editProfile('${field}')">✏️</button>`;
+            
+            this.showNotification('✓ 用户画像已保存');
+            
+            // 重新加载记忆面板确保数据同步
+            await this.loadMemoryPanel();
+        } catch (error) {
+            console.error('保存用户画像失败:', error);
+            this.showNotification('保存失败，请重试');
         }
     }
 

@@ -81,6 +81,32 @@
                 <p><span id="panel-total-chats">0</span> 轮</p>
             </div>
             <div class="panel-section">
+                <h4>用户画像</h4>
+                <div class="profile-grid">
+                    <div class="profile-item">
+                        <span class="profile-label">📍 地区</span>
+                        <span id="profile-region" class="profile-value">未知</span>
+                        <div class="profile-actions" id="actions-region">
+                            <button class="edit-btn" onclick="chatApp.editProfile('region')">✏️</button>
+                        </div>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">👤 身份</span>
+                        <span id="profile-identity" class="profile-value">未知</span>
+                        <div class="profile-actions" id="actions-identity">
+                            <button class="edit-btn" onclick="chatApp.editProfile('identity')">✏️</button>
+                        </div>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">🎯 兴趣</span>
+                        <span id="profile-interests" class="profile-value">未知</span>
+                        <div class="profile-actions" id="actions-interests">
+                            <button class="edit-btn" onclick="chatApp.editProfile('interests')">✏️</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-section">
                 <h4>长期记忆</h4>
                 <p class="empty-hint">暂无长期记忆</p>
             </div>

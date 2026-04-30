@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from backend.database import get_db
-from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse
+from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse, UserProfileUpdateRequest
 from backend.services.llm_service import llm_service
 from backend.services.memory_service import memory_service
 from backend import prompts
@@ -387,3 +387,32 @@ async def get_memory_panel(session_id: str):
                 "extra_info": user_profile.get("extra_info")
             }
         )
+
+
+@router.put("/{session_id}/profile", response_model=UserProfileUpdateRequest)
+async def update_user_profile(session_id: str, request: UserProfileUpdateRequest):
+    """
+    更新用户画像（用户手动编辑）
+    """
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT user_id FROM pet_sessions WHERE session_id = ?",
+            (session_id,)
+        )
+        session = await cursor.fetchone()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        user_id = dict(zip([d[0] for d in cursor.description], session))["user_id"]
+
+        profile_data = {
+            "region": request.region if request.region else "未知",
+            "identity": request.identity if request.identity else "未知",
+            "interests": request.interests if request.interests else "未知",
+            "extra_info": request.extra_info
+        }
+
+        await memory_service.save_user_profile(user_id, profile_data)
+
+        return UserProfileUpdateRequest(**profile_data)

@@ -83,6 +83,22 @@ const API = {
         }
 
         return await response.json();
+    },
+
+    async updateUserProfile(sessionId, profileData) {
+        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/profile`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(profileData)
+        });
+
+        if (!response.ok) {
+            throw new Error('更新用户画像失败');
+        }
+
+        return await response.json();
     }
 };
 

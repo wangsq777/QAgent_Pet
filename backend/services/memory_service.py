@@ -150,5 +150,123 @@ class MemoryService:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    async def merge_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> None:
+        """
+        合并用户画像（只更新非空的新值，保留已有值）
+        """
+        async with get_db() as db:
+            existing = await db.execute(
+                "SELECT * FROM user_profiles WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await existing.fetchone()
+            
+            if row:
+                existing_data = dict(row)
+                # 合并：只有新值非空才更新
+                new_region = profile_data.get("region")
+                new_identity = profile_data.get("identity")
+                new_interests = profile_data.get("interests")
+                new_extra_info = profile_data.get("extra_info")
+                
+                update_fields = []
+                update_values = []
+                
+                if new_region is not None and new_region != "" and new_region != "null":
+                    update_fields.append("region = ?")
+                    update_values.append(new_region)
+                if new_identity is not None and new_identity != "" and new_identity != "null":
+                    update_fields.append("identity = ?")
+                    update_values.append(new_identity)
+                if new_interests is not None and new_interests != "" and new_interests != "null":
+                    update_fields.append("interests = ?")
+                    update_values.append(new_interests)
+                if new_extra_info is not None and new_extra_info != "" and new_extra_info != "null":
+                    update_fields.append("extra_info = ?")
+                    update_values.append(new_extra_info)
+                
+                if update_fields:
+                    update_fields.append("updated_at = ?")
+                    update_values.append(datetime.now())
+                    update_values.append(user_id)
+                    
+                    await db.execute(
+                        f"UPDATE user_profiles SET {', '.join(update_fields)} WHERE user_id = ?",
+                        update_values
+                    )
+                    print(f"[MemoryService] 用户画像已更新: {profile_data}")
+                else:
+                    print(f"[MemoryService] 用户画像无新数据，跳过更新")
+            else:
+                # 创建新记录
+                profile_id = str(uuid.uuid4())
+                await db.execute(
+                    """
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        user_id,
+                        profile_data.get("region"),
+                        profile_data.get("identity"),
+                        profile_data.get("interests"),
+                        profile_data.get("extra_info"),
+                        datetime.now(),
+                        datetime.now()
+                    )
+                )
+                print(f"[MemoryService] 用户画像已创建: {profile_data}")
+            
+            await db.commit()
+
+    async def save_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> None:
+        """
+        直接保存用户画像（用于用户手动编辑，允许空值覆盖）
+        """
+        async with get_db() as db:
+            existing = await db.execute(
+                "SELECT profile_id FROM user_profiles WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await existing.fetchone()
+            
+            if row:
+                await db.execute(
+                    """
+                    UPDATE user_profiles 
+                    SET region = ?, identity = ?, interests = ?, extra_info = ?, updated_at = ?
+                    WHERE user_id = ?
+                    """,
+                    (
+                        profile_data.get("region"),
+                        profile_data.get("identity"),
+                        profile_data.get("interests"),
+                        profile_data.get("extra_info"),
+                        datetime.now(),
+                        user_id
+                    )
+                )
+            else:
+                profile_id = str(uuid.uuid4())
+                await db.execute(
+                    """
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        user_id,
+                        profile_data.get("region"),
+                        profile_data.get("identity"),
+                        profile_data.get("interests"),
+                        profile_data.get("extra_info"),
+                        datetime.now(),
+                        datetime.now()
+                    )
+                )
+            await db.commit()
+            print(f"[MemoryService] 用户画像已保存: {profile_data}")
+
 
 memory_service = MemoryService()
