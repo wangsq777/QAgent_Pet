@@ -1,0 +1,27 @@
+# Render Blueprint
+# 部署命令: render blueprint create
+
+services:
+  - type: web
+    name: qagent-pet
+    runtime: python
+    region: oregon  # 可选: oregon, frankfurt, singapore, ohio
+    plan: free  # 可选: free, starter, pro
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: LLM_API_KEY
+        sync: false  # 需要在 Render Dashboard 中手动设置
+      - key: LLM_BASE_URL
+        value: "https://api.minimax.chat/v1"
+      - key: LLM_MODEL
+        value: "MiniMax-M2.5"
+      - key: WEATHER_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: "sqlite+aiosqlite:///./qagent_pet.db"
+      - key: PORT
+        value: "10000"
