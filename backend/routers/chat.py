@@ -8,6 +8,7 @@ from backend.services.llm_service import llm_service
 from backend.services.memory_service import memory_service
 from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
+from backend.services.user_profile_agent import user_profile_agent
 from backend import prompts
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
@@ -174,11 +175,13 @@ async def execute_tools_and_build_final_prompt(
 原始回复中可能已包含一些文字，你可以在此基础上结合工具结果完善回复。
 请直接输出最终回复内容，不要重复工具调用格式。"""
     
-    final_reply = await llm_service.chat([{"role": "user", "content": second_prompt}])
+    final_reply = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback")
     
-    # 如果 LLM 生成回复成功，返回结果
+    # 如果 LLM 生成回复成功，返回结果（并清理可能的 TOOL_CALL 标记）
     if final_reply:
-        return final_reply, tool_results
+        # 再次清理可能的 TOOL_CALL 标记
+        cleaned_final = tool_executor.remove_tool_calls(final_reply)
+        return cleaned_final, tool_results
     
     # LLM 调用失败时，生成包含工具结果的 fallback 回复
     if tool_results:
@@ -323,7 +326,7 @@ Agent 需要自主从用户消息中识别位置信息：
 
 请用{pet_type}的性格风格回复，直接输出回复内容。"""
 
-    reply = await llm_service.chat([{"role": "user", "content": full_prompt}])
+    reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")
     if not reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
@@ -361,6 +364,22 @@ Agent 需要自主从用户消息中识别位置信息：
             )
             await db.commit()
         print(f"[DEBUG] Schedule saved: {schedule_extracted}")
+
+    # 后台更新用户画像（使用用户画像总结 Agent）
+    user_profile_updated = False
+    try:
+        conversation_for_profile = context['conversation']
+        existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
+        extracted_profile = await user_profile_agent.analyze_and_extract(
+            conversation_for_profile, 
+            existing_profile
+        )
+        if extracted_profile:
+            await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
+            user_profile_updated = True
+            print(f"[DEBUG] User profile updated by agent: {extracted_profile}")
+    except Exception as e:
+        print(f"[DEBUG] User profile agent error: {e}")
 
     emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
 
@@ -405,7 +424,8 @@ Agent 需要自主从用户消息中识别位置信息：
         total_chats=new_total_chats,
         schedule_extracted=schedule_extracted,
         memory_compressed=memory_compressed,
-        daily_share=daily_share
+        daily_share=daily_share,
+        user_profile_updated=user_profile_updated
     )
 
 

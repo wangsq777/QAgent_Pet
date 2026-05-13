@@ -34,6 +34,7 @@ class ChatResponse(BaseModel):
     schedule_extracted: Optional[dict] = None
     memory_compressed: bool = False
     daily_share: Optional[dict] = None  # 日常分享消息（约33%概率触发）
+    user_profile_updated: bool = False  # 用户画像是否更新
 
 
 class MessageResponse(BaseModel):
@@ -74,6 +75,13 @@ class UserProfileResponse(BaseModel):
     identity: Optional[str] = None
     interests: Optional[List[str]] = None
     extra_info: Optional[dict] = None
+
+
+class UserProfileUpdateRequest(BaseModel):
+    region: Optional[str] = None
+    identity: Optional[str] = None
+    interests: Optional[str] = None
+    extra_info: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
