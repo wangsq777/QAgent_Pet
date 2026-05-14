@@ -26,7 +26,9 @@ async def create_session(request: SessionCreateRequest):
     user_id = request.user_id
     pet_type = request.pet_type
 
-    if pet_type not in ["hot_dog", "cold_cat", "mouse"]:
+    # 支持自定义宠物类型
+    valid_pet_types = ["hot_dog", "cold_cat", "mouse", "custom"]
+    if pet_type not in valid_pet_types:
         raise HTTPException(status_code=400, detail="Invalid pet type")
 
     async with get_db() as db:
@@ -88,12 +90,26 @@ async def create_session(request: SessionCreateRequest):
         "cold_cat": prompts.cold_cat,
         "mouse": prompts.mouse
     }
-    pet_info = pet_prompts.get(pet_type)
-    welcome_content = await llm_service.generate_welcome_message(
-        pet_type,
-        pet_info.PET_NAME,
-        pet_info.PET_PERSONALITY
-    )
+
+    # 自定义宠物使用不同的欢迎语逻辑
+    if pet_type == "custom":
+        # 自定义宠物的欢迎语由前端配置，这里使用默认欢迎语
+        from backend.prompts.custom_pet import generate_welcome_messages
+        pet_name = request.nickname or "小可爱"
+        welcome_messages = generate_welcome_messages(
+            pet_name=pet_name,
+            pet_type="dog",
+            personality_tags=["活泼"],
+            catchphrase=None
+        )
+        welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是你的专属宠物{pet_name}！"
+    else:
+        pet_info = pet_prompts.get(pet_type)
+        welcome_content = await llm_service.generate_welcome_message(
+            pet_type,
+            pet_info.PET_NAME,
+            pet_info.PET_PERSONALITY
+        )
 
     await memory_service.save_message(session_id, "assistant", welcome_content, is_proactive=True)
 

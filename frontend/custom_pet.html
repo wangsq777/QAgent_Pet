@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>创造你的专属宠物 - QAgent Pet</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/custom_pet.css">
+</head>
+<body>
+    <div class="custom-pet-container">
+        <div class="header">
+            <h1>✨ 创造你的专属宠物</h1>
+            <p>为你的AI伙伴赋予独特的灵魂，打造最懂你的专属宠物！</p>
+        </div>
+
+        <div class="custom-pet-form">
+            <div class="form-section">
+                <h3>基本信息</h3>
+                
+                <div class="form-group">
+                    <label for="pet-name">宠物名字 <span class="required">*</span></label>
+                    <input type="text" id="pet-name" placeholder="给你的宠物起个名字..." maxlength="20" required>
+                    <span class="char-count"><span id="name-count">0</span>/20</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="pet-type">宠物类型 <span class="required">*</span></label>
+                    <div class="type-grid">
+                        <button type="button" class="type-btn" data-type="dog">
+                            <span class="type-icon">🐕</span>
+                            <span class="type-name">小狗</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="cat">
+                            <span class="type-icon">🐱</span>
+                            <span class="type-name">小猫</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="rabbit">
+                            <span class="type-icon">🐰</span>
+                            <span class="type-name">小兔</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="bird">
+                            <span class="type-icon">🦜</span>
+                            <span class="type-name">小鸟</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="hamster">
+                            <span class="type-icon">🐹</span>
+                            <span class="type-name">仓鼠</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="fox">
+                            <span class="type-icon">🦊</span>
+                            <span class="type-name">小狐狸</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="bear">
+                            <span class="type-icon">🐻</span>
+                            <span class="type-name">小熊</span>
+                        </button>
+                        <button type="button" class="type-btn" data-type="panda">
+                            <span class="type-icon">🐼</span>
+                            <span class="type-name">小熊猫</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h3>性格特点</h3>
+                <p class="section-hint">选择1-3个最能描述你宠物的性格标签</p>
+                
+                <div class="personality-grid">
+                    <button type="button" class="personality-btn" data-trait="热情活泼">
+                        <span class="trait-icon">🔥</span>
+                        <span class="trait-name">热情活泼</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="高冷傲娇">
+                        <span class="trait-icon">❄️</span>
+                        <span class="trait-name">高冷傲娇</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="温柔体贴">
+                        <span class="trait-icon">💕</span>
+                        <span class="trait-name">温柔体贴</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="调皮捣蛋">
+                        <span class="trait-icon">😈</span>
+                        <span class="trait-name">调皮捣蛋</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="聪明伶俐">
+                        <span class="trait-icon">🧠</span>
+                        <span class="trait-name">聪明伶俐</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="胆小害羞">
+                        <span class="trait-icon">😳</span>
+                        <span class="trait-name">胆小害羞</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="忠诚可靠">
+                        <span class="trait-icon">🛡️</span>
+                        <span class="trait-name">忠诚可靠</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="好奇宝宝">
+                        <span class="trait-icon">🔍</span>
+                        <span class="trait-name">好奇宝宝</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="话唠吐槽">
+                        <span class="trait-icon">💬</span>
+                        <span class="trait-name">话唠吐槽</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="安静陪伴">
+                        <span class="trait-icon">🌙</span>
+                        <span class="trait-name">安静陪伴</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="幽默搞笑">
+                        <span class="trait-icon">😄</span>
+                        <span class="trait-name">幽默搞笑</span>
+                    </button>
+                    <button type="button" class="personality-btn" data-trait="暖心治愈">
+                        <span class="trait-icon">☀️</span>
+                        <span class="trait-name">暖心治愈</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h3>额外信息（可选）</h3>
+                
+                <div class="form-group">
+                    <label for="pet-catchphrase">口头禅</label>
+                    <input type="text" id="pet-catchphrase" placeholder="你的宠物有什么口头禅吗？" maxlength="50">
+                    <span class="char-count"><span id="catchphrase-count">0</span>/50</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="pet-habits">特殊习惯</label>
+                    <textarea id="pet-habits" placeholder="描述一下你宠物的有趣小习惯..." rows="3" maxlength="200"></textarea>
+                    <span class="char-count"><span id="habits-count">0</span>/200</span>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="back-btn" onclick="goBack()">← 返回</button>
+                <button type="button" class="preview-btn" onclick="previewPet()">预览配置</button>
+                <button type="button" class="create-btn" onclick="createPet()">创造宠物</button>
+            </div>
+        </div>
+
+        <!-- 预览弹窗 -->
+        <div id="preview-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>✨ 宠物配置预览</h3>
+                    <button class="close-btn" onclick="closePreview()">×</button>
+                </div>
+                <div class="modal-body" id="preview-content">
+                    <!-- 预览内容将动态填充 -->
+                </div>
+                <div class="modal-footer">
+                    <button class="back-btn" onclick="closePreview()">继续调整</button>
+                    <button class="create-btn" onclick="confirmCreate()">确认创造</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/custom_pet.js"></script>
+</body>
+</html>

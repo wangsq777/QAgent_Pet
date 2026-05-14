@@ -87,3 +87,69 @@ class UserProfileUpdateRequest(BaseModel):
 class ErrorResponse(BaseModel):
     error_code: str
     message: str
+
+
+# ============ 自定义宠物相关 Schema ============
+
+class CustomPetConfigRequest(BaseModel):
+    """自定义宠物配置请求"""
+    pet_name: str  # 宠物名称
+    pet_type: str  # 宠物类型: dog/cat/small_animal/other
+    personality_tags: List[str]  # 性格标签列表
+    catchphrase: Optional[str] = None  # 口头禅（选填）
+    special_habits: Optional[str] = None  # 特殊习惯（选填）
+
+
+class CustomPetPreviewRequest(BaseModel):
+    """自定义宠物预览请求"""
+    pet_name: str
+    pet_type: str
+    personality_tags: List[str]
+    catchphrase: Optional[str] = None
+    special_habits: Optional[str] = None
+
+
+class CustomPetPreviewResponse(BaseModel):
+    """自定义宠物预览响应"""
+    system_prompt: str  # 生成的完整 System Prompt
+    pet_name: str
+    pet_type: str
+    personality_tags: List[str]
+    catchphrase: str
+    special_habits: Optional[str] = None
+    welcome_messages: List[str]  # 欢迎语列表
+
+
+class CustomPetCreateRequest(BaseModel):
+    """创建自定义宠物请求"""
+    pet_name: str
+    pet_type: str
+    personality_tags: List[str]
+    catchphrase: Optional[str] = None
+    special_habits: Optional[str] = None
+
+
+class CustomPetResponse(BaseModel):
+    """自定义宠物响应"""
+    pet_id: str
+    pet_name: str
+    pet_type: str
+    personality_tags: List[str]
+    catchphrase: str
+    special_habits: Optional[str] = None
+    system_prompt: str
+    created_at: datetime
+
+
+class PetTemplateResponse(BaseModel):
+    """宠物模板响应"""
+    pet_type: str
+    pet_name: str
+    personality_tags: List[str]
+    is_preset: bool
+
+
+class PetTemplateListResponse(BaseModel):
+    """宠物模板列表响应"""
+    presets: List[PetTemplateResponse]  # 预置宠物列表
+    customs: List[PetTemplateResponse]  # 用户自定义宠物列表

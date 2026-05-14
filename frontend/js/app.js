@@ -26,17 +26,20 @@ class ChatApp {
         const petNames = {
             'hot_dog': 'Hot Dog',
             'cold_cat': 'Cold Cat',
-            'mouse': '鼠鼠'
+            'mouse': '鼠鼠',
+            'custom': localStorage.getItem('qagent_custom_pet_name') || '我的宠物'
         };
         const petImages = {
             'hot_dog': 'images/hot_dog.png',
             'cold_cat': 'images/cold_cat.png',
-            'mouse': 'images/mouse.png'
+            'mouse': 'images/mouse.png',
+            'custom': 'images/custom_pet.svg'
         };
         const petColors = {
             'hot_dog': '#ff6b6b',
             'cold_cat': '#74b9ff',
-            'mouse': '#fdcb6e'
+            'mouse': '#fdcb6e',
+            'custom': '#a29bfe'
         };
 
         const petName = petNames[this.petType] || 'Hot Dog';
@@ -137,7 +140,8 @@ class ChatApp {
         const petImages = {
             'hot_dog': 'images/hot_dog.png',
             'cold_cat': 'images/cold_cat.png',
-            'mouse': 'images/mouse.png'
+            'mouse': 'images/mouse.png',
+            'custom': 'images/custom_pet.svg'
         };
         const petImage = petImages[this.petType] || 'images/hot_dog.png';
         

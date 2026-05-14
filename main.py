@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router
+from backend.routers.custom_pets import router as custom_pets_router
 
 
 @asynccontextmanager
@@ -37,6 +38,7 @@ app.add_middleware(
 
 app.include_router(sessions_router)
 app.include_router(chat_router)
+app.include_router(custom_pets_router)
 
 # 挂载静态文件目录
 frontend_path = os.path.join(os.path.dirname(__file__), "frontend")

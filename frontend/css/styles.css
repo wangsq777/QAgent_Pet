@@ -103,6 +103,15 @@ body {
     --card-bg: linear-gradient(135deg, #fffef5 0%, #fff 100%);
 }
 
+.pet-card.custom-pet {
+    --card-accent: #a29bfe;
+    --card-bg: linear-gradient(135deg, #f5f3ff 0%, #fff 100%);
+}
+
+.pet-card.custom-pet::before {
+    background: linear-gradient(90deg, #a29bfe, #fd79a8);
+}
+
 .pet-card {
     background: var(--card-bg);
 }

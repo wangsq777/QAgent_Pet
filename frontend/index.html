@@ -37,6 +37,14 @@
                 <p class="pet-desc">胆子很小但很真诚的小老鼠。会偷偷记住你说的每件小事，小心翼翼地关心你。</p>
                 <button class="select-btn" onclick="selectPet('mouse')">选择 鼠鼠</button>
             </div>
+
+            <div class="pet-card custom-pet" data-pet-type="custom" onclick="goToCustomPet()">
+                <img src="images/custom_pet.svg" alt="自定义宠物" class="pet-emoji">
+                <h2 class="pet-name">自定义宠物</h2>
+                <span class="pet-tag">独一无二</span>
+                <p class="pet-desc">创造属于你自己的专属宠物！设定独一无二的名字和性格，打造最懂你的AI伙伴。</p>
+                <button class="select-btn" onclick="event.stopPropagation(); goToCustomPet()">开始创造</button>
+            </div>
         </div>
 
         <div class="footer">
@@ -73,6 +81,10 @@
                 alert('创建会话失败，请重试: ' + error.message);
                 loading.style.display = 'none';
             }
+        }
+
+        function goToCustomPet() {
+            window.location.href = 'custom_pet.html';
         }
     </script>
 </body>

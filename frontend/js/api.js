@@ -99,6 +99,40 @@ const API = {
         }
 
         return await response.json();
+    },
+
+    // 自定义宠物API
+    async createCustomPet(petData) {
+        const response = await fetch(`${API_BASE}/api/custom-pets`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                pet_name: petData.pet_name,
+                pet_type: petData.pet_type,
+                personality_tags: petData.personality_tags,
+                catchphrase: petData.catchphrase,
+                special_habits: petData.special_habits
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '创建自定义宠物失败');
+        }
+
+        return await response.json();
+    },
+
+    async getCustomPetTemplates() {
+        const response = await fetch(`${API_BASE}/api/custom-pets/templates`);
+
+        if (!response.ok) {
+            throw new Error('获取宠物模板失败');
+        }
+
+        return await response.json();
     }
 };
 

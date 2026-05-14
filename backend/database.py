@@ -20,7 +20,7 @@ async def init_database():
             CREATE TABLE IF NOT EXISTS pet_sessions (
                 session_id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
-                pet_type TEXT NOT NULL CHECK(pet_type IN ('hot_dog', 'cold_cat', 'mouse')),
+                pet_type TEXT NOT NULL CHECK(pet_type IN ('hot_dog', 'cold_cat', 'mouse', 'custom')),
                 intimacy INTEGER DEFAULT 0,
                 total_chats INTEGER DEFAULT 0,
                 last_interaction_at DATETIME,
