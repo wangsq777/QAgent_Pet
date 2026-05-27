@@ -10,6 +10,8 @@ from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
 from backend import prompts
+from backend.routers.custom_pets import custom_pets_storage
+from backend.services.embedding_service import embedding_service
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
 
@@ -81,7 +83,7 @@ async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
     return f"{prefixes.get(pet_type, '')}{topic}"
 
 
-async def build_context(session_id: str, pet_type: str) -> dict:
+async def build_context(session_id: str, pet_type: str, custom_pet_id: str = None) -> dict:
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -93,6 +95,9 @@ async def build_context(session_id: str, pet_type: str) -> dict:
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
+        
+        # 获取 custom_pet_id（优先使用传入的参数）
+        pet_id = custom_pet_id or session_dict.get("custom_pet_id")
 
         pet_prompts = {
             "hot_dog": prompts.hot_dog,
@@ -100,6 +105,21 @@ async def build_context(session_id: str, pet_type: str) -> dict:
             "mouse": prompts.mouse
         }
         pet_info = pet_prompts.get(pet_type)
+        pet_name = pet_info.PET_NAME if pet_info else "小可爱"
+        system_prompt = ""
+
+        # 自定义宠物：使用 custom_pet_id 获取系统提示词
+        if pet_type == "custom" and pet_id:
+            custom_pet = custom_pets_storage.get(pet_id)
+            if custom_pet:
+                pet_name = custom_pet.pet_name
+                system_prompt = custom_pet.system_prompt
+            else:
+                # 如果找不到自定义宠物，使用默认提示
+                system_prompt = f"你是 {pet_name}，一只可爱的小宠物。"
+
+        if not system_prompt:
+            system_prompt = pet_info.get_system_prompt() if pet_info else "你是我的宠物。"
 
         long_term_memories = await memory_service.get_long_term_memories(session_id)
         long_term_text = "\n".join([m["summary"] for m in long_term_memories])
@@ -108,7 +128,7 @@ async def build_context(session_id: str, pet_type: str) -> dict:
 
         short_term_messages = await memory_service.get_short_term_messages(session_id, limit=40)
         conversation_text = "\n".join([
-            f"{'主人' if m.role == 'user' else pet_info.PET_NAME}: {m.content}"
+            f"{'主人' if m.role == 'user' else pet_name}: {m.content}"
             for m in short_term_messages
         ])
 
@@ -116,7 +136,8 @@ async def build_context(session_id: str, pet_type: str) -> dict:
         time_str = now.strftime("现在是%Y年%m月%d日 %H:%M")
 
         context = {
-            "system_prompt": pet_info.get_system_prompt(),
+            "system_prompt": system_prompt,
+            "pet_name": pet_name,
             "long_term_memory": long_term_text or "（暂无长期记忆）",
             "user_profile": f"地区: {user_profile.get('region', '未知')}; 身份: {user_profile.get('identity', '未知')}; 兴趣: {user_profile.get('interests', '未知')}",
             "intimacy_info": f"亲密度: {session_dict['intimacy']} ({get_intimacy_level(session_dict['intimacy'])}); 共聊天: {session_dict['total_chats']}轮",
@@ -212,12 +233,28 @@ async def chat(session_id: str, request: ChatRequest):
 
         session_dict = dict(session)
         pet_type = session_dict["pet_type"]
+        custom_pet_id = session_dict.get("custom_pet_id")
+
+        # 获取宠物名称（用于懒说话分支）
+        pet_prompts = {
+            "hot_dog": prompts.hot_dog,
+            "cold_cat": prompts.cold_cat,
+            "mouse": prompts.mouse
+        }
+        pet_info = pet_prompts.get(pet_type)
+        pet_name = pet_info.PET_NAME if pet_info else "小可爱"
+        
+        # 自定义宠物使用自定义名称
+        if pet_type == "custom" and custom_pet_id:
+            custom_pet = custom_pets_storage.get(custom_pet_id)
+            if custom_pet:
+                pet_name = custom_pet.pet_name
 
         if session_dict["pet_status"] == "hiding":
             status_until = session_dict.get("status_until")
             if status_until and datetime.now() < datetime.fromisoformat(status_until):
                 return ChatResponse(
-                    reply="（鼠鼠躲起来了，暂时不敢出来...）",
+                    reply=f"（{pet_name}躲起来了，暂时不敢出来...）",
                     emotion_tag="neutral",
                     intimacy=session_dict["intimacy"],
                     total_chats=session_dict["total_chats"],
@@ -231,17 +268,13 @@ async def chat(session_id: str, request: ChatRequest):
                 )
                 session_dict["pet_status"] = "normal"
 
-        # 提前获取 pet_info（懒说话分支需要用到）
-        _pet_prompts = {"hot_dog": prompts.hot_dog, "cold_cat": prompts.cold_cat, "mouse": prompts.mouse}
-        pet_info = _pet_prompts.get(pet_type)
-
         if pet_type == "cold_cat" and session_dict["total_chats"] > 0:
             import random
             if random.random() < 0.3:
                 # 懒说话时仍需检查是否需要分享日常
                 daily_share = None
                 if random.randint(1, 100) % 3 == 0:
-                    daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+                    daily_content = await generate_share_daily_message(pet_type, pet_name)
                     await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
                     daily_share = {"role": "assistant", "content": daily_content}
                     print(f"[DEBUG] Daily share triggered (cold_cat lazy): {daily_content}")
@@ -256,9 +289,21 @@ async def chat(session_id: str, request: ChatRequest):
                     daily_share=daily_share
                 )
 
-    await memory_service.save_message(session_id, "user", request.content)
+    user_msg_id = await memory_service.save_message(session_id, "user", request.content)
 
-    context = await build_context(session_id, pet_type)
+    # 为用户消息生成向量（异步，失败不影响主流程）
+    user_msg_embedding = await embedding_service.embed(request.content)
+    if user_msg_embedding:
+        await embedding_service.save_vector(
+            session_id=session_id,
+            source_type="message",
+            source_id=user_msg_id,
+            content=request.content,
+            embedding=user_msg_embedding
+        )
+
+    context = await build_context(session_id, pet_type, custom_pet_id)
+    pet_name = context.get("pet_name", "小可爱")
     
     # 获取用户画像中的地区（作为备用提示给 Agent）
     user_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
@@ -331,7 +376,8 @@ Agent 需要自主从用户消息中识别位置信息：
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
             "cold_cat": "......不想说话。",
-            "mouse": "鼠鼠我啊......突然不知道怎么回答了......"
+            "mouse": "鼠鼠我啊......突然不知道怎么回答了......",
+            "custom": f"{pet_name}啊......突然不知道怎么回答了......"
         }
         reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
     
@@ -383,20 +429,35 @@ Agent 需要自主从用户消息中识别位置信息：
 
     emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
 
-    await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
+    assistant_msg_id = await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
+
+    # 为助手回复生成向量
+    assistant_embedding = await embedding_service.embed(reply)
+    if assistant_embedding:
+        await embedding_service.save_vector(
+            session_id=session_id,
+            source_type="message",
+            source_id=assistant_msg_id,
+            content=reply,
+            embedding=assistant_embedding
+        )
 
     intimacy_change = calculate_intimacy_change(emotion_tag)
     new_intimacy = min(100, session_dict["intimacy"] + intimacy_change)
     new_total_chats = session_dict["total_chats"] + 1
 
-    message_count = await memory_service.get_message_count(session_id)
+    # 话题感知压缩触发
     memory_compressed = False
-    if message_count > 20 and message_count % 20 == 0:
-        short_term_messages = await memory_service.get_short_term_messages(session_id, limit=40)
-        pet_prompts = {"hot_dog": prompts.hot_dog, "cold_cat": prompts.cold_cat, "mouse": prompts.mouse}
-        pet_info = pet_prompts.get(pet_type)
-        await memory_service.compress_to_long_term(session_id, short_term_messages, pet_info.PET_NAME)
-        memory_compressed = True
+    recent_for_compress = await memory_service.get_short_term_messages(session_id, limit=10)
+    recent_dicts = [{"role": m.role, "content": m.content} for m in recent_for_compress]
+    should_compress = await memory_service.should_compress(session_id, recent_dicts, request.content)
+    if should_compress:
+        all_messages = await memory_service.get_short_term_messages(session_id, limit=100)
+        window_ids = set(m.message_id for m in recent_for_compress)
+        uncompress_messages = [m for m in all_messages if m.message_id not in window_ids]
+        if uncompress_messages:
+            await memory_service.compress_to_long_term(session_id, uncompress_messages[:15], pet_name)
+            memory_compressed = True
 
     async with get_db() as db:
         await db.execute(
@@ -407,12 +468,10 @@ Agent 需要自主从用户消息中识别位置信息：
     
     # 随机分享日常（约33%概率）
     daily_share = None
-    pet_prompts = {"hot_dog": prompts.hot_dog, "cold_cat": prompts.cold_cat, "mouse": prompts.mouse}
-    pet_info = pet_prompts.get(pet_type)
     
     import random
     if random.randint(1, 100) % 3 == 0 and session_dict.get("pet_status") != "hiding":
-        daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+        daily_content = await generate_share_daily_message(pet_type, pet_name)
         await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
         daily_share = {"role": "assistant", "content": daily_content}
         print(f"[DEBUG] Daily share triggered: {daily_content}")
