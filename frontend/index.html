@@ -131,13 +131,20 @@
             'horse': '🐴', 'rabbit': '🐰', 'bird': '🐦', 'fox': '🦊', 'bear': '🐻'
         };
 
-        // 宠物类型对应的预置头像图片（狗、猫、仓鼠使用预置宠物图片）
+        // 宠物类型对应的预置头像图片
         const petTypePresetImages = {
             'dog': 'images/hot_dog.png',
             'cat': 'images/cold_cat.png',
             'hamster': 'images/mouse.png',
             'panda': 'images/panda.png',
-            'tiger': 'images/tiger.png'
+            'tiger': 'images/tiger.png',
+            'lion': 'images/lion.png',
+            'snake': 'images/snake.png',
+            'cheetah': 'images/cheetah.png',
+            'deer': 'images/deer.png',
+            'lamb': 'images/lamb.png',
+            'pig': 'images/pig.png',
+            'horse': 'images/horse.png'
         };
 
         const petTypeNames = {
@@ -258,6 +265,13 @@
             loading.style.display = 'flex';
 
             try {
+                // 清除自定义宠物相关的 localStorage（防止残留头像影响内置宠物）
+                localStorage.removeItem('qagent_custom_avatar');
+                localStorage.removeItem('qagent_custom_pet');
+                localStorage.removeItem('qagent_custom_pet_id');
+                localStorage.removeItem('qagent_custom_pet_name');
+                localStorage.removeItem('qagent_pet_type_emoji');
+
                 const response = await API.createSession(userId, petType);
                 localStorage.setItem('qagent_session_id', response.session_id);
                 localStorage.setItem('qagent_pet_type', response.pet_type);

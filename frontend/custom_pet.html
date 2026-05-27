@@ -289,31 +289,31 @@
                             <span class="name">小老虎</span>
                         </div>
                             <div class="pet-type-option" data-type="lion" onclick="selectPetType('lion')">
-                                <span class="icon">🦁</span>
+                                <img src="images/lion.png" alt="小狮子" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小狮子</span>
                             </div>
                             <div class="pet-type-option" data-type="snake" onclick="selectPetType('snake')">
-                                <span class="icon">🐍</span>
+                                <img src="images/snake.png" alt="小蛇" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小蛇</span>
                             </div>
                             <div class="pet-type-option" data-type="cheetah" onclick="selectPetType('cheetah')">
-                                <span class="icon">🐆</span>
+                                <img src="images/cheetah.png" alt="小猎豹" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小猎豹</span>
                             </div>
                             <div class="pet-type-option" data-type="deer" onclick="selectPetType('deer')">
-                                <span class="icon">🦌</span>
+                                <img src="images/deer.png" alt="小鹿" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小鹿</span>
                             </div>
                             <div class="pet-type-option" data-type="lamb" onclick="selectPetType('lamb')">
-                                <span class="icon">🐑</span>
+                                <img src="images/lamb.png" alt="小羊" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小羊</span>
                             </div>
                             <div class="pet-type-option" data-type="pig" onclick="selectPetType('pig')">
-                                <span class="icon">🐷</span>
+                                <img src="images/pig.png" alt="小猪" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小猪</span>
                             </div>
                             <div class="pet-type-option" data-type="horse" onclick="selectPetType('horse')">
-                                <span class="icon">🐴</span>
+                                <img src="images/horse.png" alt="小马" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
                                 <span class="name">小马</span>
                             </div>
                         </div>
@@ -394,13 +394,20 @@
             'horse': '🐴'
         };
 
-        // 宠物类型对应的预置头像图片（狗、猫、仓鼠使用预置宠物图片）
+        // 宠物类型对应的预置头像图片
         const petTypePresetImages = {
             'dog': 'images/hot_dog.png',
             'cat': 'images/cold_cat.png',
             'hamster': 'images/mouse.png',
             'panda': 'images/panda.png',
-            'tiger': 'images/tiger.png'
+            'tiger': 'images/tiger.png',
+            'lion': 'images/lion.png',
+            'snake': 'images/snake.png',
+            'cheetah': 'images/cheetah.png',
+            'deer': 'images/deer.png',
+            'lamb': 'images/lamb.png',
+            'pig': 'images/pig.png',
+            'horse': 'images/horse.png'
         };
 
         // 头像上传处理

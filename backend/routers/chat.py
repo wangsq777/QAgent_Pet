@@ -449,7 +449,7 @@ Agent 需要自主从用户消息中识别位置信息：
     # 后台更新用户画像（使用用户画像总结 Agent）
     user_profile_updated = False
     try:
-        conversation_for_profile = context['conversation']
+        conversation_for_profile = recent_conversation
         existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
         extracted_profile = await user_profile_agent.analyze_and_extract(
             conversation_for_profile, 
