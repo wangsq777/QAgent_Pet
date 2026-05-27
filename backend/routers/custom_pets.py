@@ -42,12 +42,18 @@ def get_pet_type_display(pet_type: str) -> str:
         "cat": "小猫",
         "rabbit": "小兔",
         "bird": "小鸟",
-        "hamster": "仓鼠",
+        "hamster": "小仓鼠",
         "fox": "小狐狸",
         "bear": "小熊",
         "panda": "小熊猫",
-        "small_animal": "小动物",
-        "other": "其他"
+        "tiger": "小老虎",
+        "lion": "小狮子",
+        "snake": "小蛇",
+        "cheetah": "小猎豹",
+        "deer": "小鹿",
+        "lamb": "小羊",
+        "pig": "小猪",
+        "horse": "小马"
     }
     return type_map.get(pet_type, "其他")
 
@@ -64,7 +70,8 @@ def validate_pet_config(config: CustomPetConfigRequest) -> tuple:
         return False, "宠物名称不能超过8个字符"
     
     # 验证宠物类型
-    valid_types = ["dog", "cat", "rabbit", "bird", "hamster", "fox", "bear", "panda", "small_animal", "other"]
+    valid_types = ["dog", "cat", "rabbit", "bird", "hamster", "fox", "bear", "panda", 
+                   "tiger", "lion", "snake", "cheetah", "deer", "lamb", "pig", "horse"]
     if config.pet_type not in valid_types:
         return False, f"宠物类型无效，请选择: {', '.join(valid_types)}"
     
@@ -210,6 +217,7 @@ async def create_custom_pet(request: CustomPetCreateRequest):
         personality_tags=request.personality_tags,
         catchphrase=catchphrase,
         special_habits=request.special_habits,
+        avatar_url=request.avatar_url,
         system_prompt=system_prompt,
         created_at=now
     )
@@ -282,6 +290,7 @@ async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
         personality_tags=request.personality_tags,
         catchphrase=catchphrase,
         special_habits=request.special_habits,
+        avatar_url=request.avatar_url,
         system_prompt=system_prompt,
         created_at=original.created_at  # 保持创建时间不变
     )
@@ -316,6 +325,7 @@ async def list_custom_pets():
                 "pet_name": pet.pet_name,
                 "pet_type": pet.pet_type,
                 "personality_tags": pet.personality_tags,
+                "avatar_url": pet.avatar_url,
                 "created_at": pet.created_at.isoformat()
             }
             for pet in custom_pets_storage.values()

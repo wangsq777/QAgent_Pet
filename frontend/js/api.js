@@ -1,16 +1,20 @@
-const API_BASE = 'http://localhost:8080';
+const API_BASE = '/api';
 
 const API = {
-    async createSession(userId, petType) {
-        const response = await fetch(`${API_BASE}/api/sessions`, {
+    async createSession(userId, petType, customPetId = null) {
+        const body = {
+            user_id: userId,
+            pet_type: petType
+        };
+        if (customPetId) {
+            body.custom_pet_id = customPetId;
+        }
+        const response = await fetch(`${API_BASE}/sessions`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                user_id: userId,
-                pet_type: petType
-            })
+            body: JSON.stringify(body)
         });
 
         if (!response.ok) {
@@ -22,7 +26,7 @@ const API = {
     },
 
     async chat(sessionId, content) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/chat`, {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/chat`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -39,7 +43,7 @@ const API = {
     },
 
     async getMessages(sessionId) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/messages`);
         
         if (!response.ok) {
             throw new Error('获取消息失败');
@@ -49,7 +53,7 @@ const API = {
     },
 
     async getSession(sessionId) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`);
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}`);
         
         if (!response.ok) {
             throw new Error('获取会话失败');
@@ -59,7 +63,7 @@ const API = {
     },
 
     async simulateTime(sessionId, mode) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/simulate-time`, {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/simulate-time`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -76,7 +80,7 @@ const API = {
     },
 
     async getMemoryPanel(sessionId) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/memory`);
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/memory`);
         
         if (!response.ok) {
             throw new Error('获取记忆面板失败');
@@ -86,7 +90,7 @@ const API = {
     },
 
     async updateUserProfile(sessionId, profileData) {
-        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/profile`, {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/profile`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -103,7 +107,7 @@ const API = {
 
     // 自定义宠物API
     async createCustomPet(petData) {
-        const response = await fetch(`${API_BASE}/api/custom-pets`, {
+        const response = await fetch(`${API_BASE}/custom-pets`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -113,7 +117,8 @@ const API = {
                 pet_type: petData.pet_type,
                 personality_tags: petData.personality_tags,
                 catchphrase: petData.catchphrase,
-                special_habits: petData.special_habits
+                special_habits: petData.special_habits,
+                avatar_url: petData.avatar_url || null
             })
         });
 
@@ -126,10 +131,20 @@ const API = {
     },
 
     async getCustomPetTemplates() {
-        const response = await fetch(`${API_BASE}/api/custom-pets/templates`);
+        const response = await fetch(`${API_BASE}/custom-pets/templates`);
 
         if (!response.ok) {
             throw new Error('获取宠物模板失败');
+        }
+
+        return await response.json();
+    },
+
+    async listCustomPets() {
+        const response = await fetch(`${API_BASE}/custom-pets`);
+
+        if (!response.ok) {
+            throw new Error('获取自定义宠物列表失败');
         }
 
         return await response.json();

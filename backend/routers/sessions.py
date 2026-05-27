@@ -25,6 +25,7 @@ def get_intimacy_level(intimacy: int) -> str:
 async def create_session(request: SessionCreateRequest):
     user_id = request.user_id
     pet_type = request.pet_type
+    custom_pet_id = request.custom_pet_id
 
     # 支持自定义宠物类型
     valid_pet_types = ["hot_dog", "cold_cat", "mouse", "custom"]
@@ -32,11 +33,17 @@ async def create_session(request: SessionCreateRequest):
         raise HTTPException(status_code=400, detail="Invalid pet type")
 
     async with get_db() as db:
-        # 查找该用户是否已有该宠物的 session
-        cursor = await db.execute(
-            "SELECT session_id FROM pet_sessions WHERE user_id = ? AND pet_type = ?",
-            (user_id, pet_type)
-        )
+        # 查找该用户是否已有该宠物的 session（自定义宠物需要匹配 custom_pet_id）
+        if pet_type == "custom" and custom_pet_id:
+            cursor = await db.execute(
+                "SELECT session_id FROM pet_sessions WHERE user_id = ? AND pet_type = ? AND custom_pet_id = ?",
+                (user_id, pet_type, custom_pet_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT session_id FROM pet_sessions WHERE user_id = ? AND pet_type = ?",
+                (user_id, pet_type)
+            )
         existing = await cursor.fetchone()
 
         if existing:
@@ -78,10 +85,10 @@ async def create_session(request: SessionCreateRequest):
 
         await db.execute(
             """
-            INSERT INTO pet_sessions (session_id, user_id, pet_type, intimacy, total_chats, last_interaction_at, pet_status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pet_sessions (session_id, user_id, pet_type, custom_pet_id, intimacy, total_chats, last_interaction_at, pet_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, user_id, pet_type, 0, 0, datetime.now(), "normal", datetime.now(), datetime.now())
+            (session_id, user_id, pet_type, custom_pet_id, 0, 0, datetime.now(), "normal", datetime.now(), datetime.now())
         )
         await db.commit()
 
@@ -92,17 +99,24 @@ async def create_session(request: SessionCreateRequest):
     }
 
     # 自定义宠物使用不同的欢迎语逻辑
-    if pet_type == "custom":
-        # 自定义宠物的欢迎语由前端配置，这里使用默认欢迎语
+    if pet_type == "custom" and custom_pet_id:
+        from backend.routers.custom_pets import custom_pets_storage
         from backend.prompts.custom_pet import generate_welcome_messages
-        pet_name = request.nickname or "小可爱"
-        welcome_messages = generate_welcome_messages(
-            pet_name=pet_name,
-            pet_type="dog",
-            personality_tags=["活泼"],
-            catchphrase=None
-        )
-        welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是你的专属宠物{pet_name}！"
+        
+        # 从 custom_pets_storage 获取真实配置
+        custom_pet = custom_pets_storage.get(custom_pet_id)
+        if custom_pet:
+            pet_name = custom_pet.pet_name
+            welcome_messages = generate_welcome_messages(
+                pet_name=pet_name,
+                pet_type=custom_pet.pet_type,
+                personality_tags=custom_pet.personality_tags,
+                catchphrase=custom_pet.catchphrase
+            )
+            welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是{pet_name}！"
+        else:
+            pet_name = request.nickname or "小可爱"
+            welcome_content = f"你好！我是你的专属宠物{pet_name}！"
     else:
         pet_info = pet_prompts.get(pet_type)
         welcome_content = await llm_service.generate_welcome_message(

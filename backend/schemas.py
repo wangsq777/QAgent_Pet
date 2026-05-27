@@ -12,6 +12,7 @@ class SessionCreateRequest(BaseModel):
     user_id: str
     pet_type: str
     nickname: Optional[str] = None
+    custom_pet_id: Optional[str] = None  # 自定义宠物ID
 
 
 class SessionResponse(BaseModel):
@@ -94,10 +95,11 @@ class ErrorResponse(BaseModel):
 class CustomPetConfigRequest(BaseModel):
     """自定义宠物配置请求"""
     pet_name: str  # 宠物名称
-    pet_type: str  # 宠物类型: dog/cat/small_animal/other
+    pet_type: str  # 宠物类型: dog/cat/hamster/panda/tiger/lion/snake/cheetah/deer/lamb/pig/horse等
     personality_tags: List[str]  # 性格标签列表
     catchphrase: Optional[str] = None  # 口头禅（选填）
     special_habits: Optional[str] = None  # 特殊习惯（选填）
+    avatar_url: Optional[str] = None  # 自定义头像URL（base64）
 
 
 class CustomPetPreviewRequest(BaseModel):
@@ -127,6 +129,7 @@ class CustomPetCreateRequest(BaseModel):
     personality_tags: List[str]
     catchphrase: Optional[str] = None
     special_habits: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class CustomPetResponse(BaseModel):
@@ -137,6 +140,7 @@ class CustomPetResponse(BaseModel):
     personality_tags: List[str]
     catchphrase: str
     special_habits: Optional[str] = None
+    avatar_url: Optional[str] = None
     system_prompt: str
     created_at: datetime
 

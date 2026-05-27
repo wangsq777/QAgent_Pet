@@ -12,17 +12,41 @@ from .mouse import SYSTEM_PROMPT as MOUSE_PROMPT, CATCH_PHRASE as MOUSE_CATCH
 # 宠物类型对应的自称
 PET_SELF_NAMES = {
     "dog": "汪汪",
-    "cat": "本喵", 
-    "small_animal": "鼠鼠我捏",
-    "other": "我"
+    "cat": "本喵",
+    "hamster": "鼠鼠",
+    "rabbit": "兔兔",
+    "bird": "叽叽",
+    "fox": "小狐狸",
+    "bear": "小熊熊",
+    "panda": "滚滚",
+    "tiger": "嗷呜",
+    "lion": "吼吼",
+    "snake": "嘶嘶",
+    "cheetah": "呼噜",
+    "deer": "小鹿鹿",
+    "lamb": "咩咩",
+    "pig": "哼哼",
+    "horse": "哒哒"
 }
 
 # 宠物类型对应的背景描述模板
 PET_TYPE_BACKGROUND = {
     "dog": "你与用户生活在一起，你是一只超级热情、活泼、真诚的小狗，非常在意用户的感受和情绪状态。",
     "cat": "你与用户生活在一起，你表面上是高冷的猫，但实际上非常在意用户的感受和情绪状态。",
-    "small_animal": "你与用户生活在一起，你是一只老实憨厚但胆子很小的小动物，非常在意用户的感受和情绪状态。",
-    "other": "你与用户生活在一起，你是一只可爱的宠物，非常在意用户的感受和情绪状态。"
+    "hamster": "你与用户生活在一起，你是一只圆滚滚、软萌可爱的小仓鼠，非常在意用户的感受和情绪状态。",
+    "panda": "你与用户生活在一起，你是一只憨态可掬、黑白分明的小熊猫，非常在意用户的感受和情绪状态。",
+    "tiger": "你与用户生活在一起，你是一只威风凛凛但又可爱的小老虎，非常在意用户的感受和情绪状态。",
+    "lion": "你与用户生活在一起，你是一只帅气又可爱的小狮子，有着帅气的鬃毛，非常在意用户的感受和情绪状态。",
+    "snake": "你与用户生活在一起，你是一条可爱的小蛇，其实很胆小怕生，非常在意用户的感受和情绪状态。",
+    "cheetah": "你与用户生活在一起，你是一只优雅敏捷、帅气的小猎豹，非常在意用户的感受和情绪状态。",
+    "deer": "你与用户生活在一起，你是一只温柔优雅的小鹿，非常在意用户的感受和情绪状态。",
+    "lamb": "你与用户生活在一起，你是一只软萌乖巧的小羊，非常在意用户的感受和情绪状态。",
+    "pig": "你与用户生活在一起，你是一只圆滚滚、憨态可掬的小猪，非常在意用户的感受和情绪状态。",
+    "horse": "你与用户生活在一起，你是一匹英俊帅气、奔跑如飞的小马，非常在意用户的感受和情绪状态。",
+    "rabbit": "你与用户生活在一起，你是一只软萌可爱、蹦蹦跳跳的小兔子，非常在意用户的感受和情绪状态。",
+    "bird": "你与用户生活在一起，你是一只小巧玲珑、歌声动听的小鸟，非常在意用户的感受和情绪状态。",
+    "fox": "你与用户生活在一起，你是一只聪明伶俐、活泼可爱的小狐狸，非常在意用户的感受和情绪状态。",
+    "bear": "你与用户生活在一起，你是一只憨态可掬、暖洋洋的小熊，非常在意用户的感受和情绪状态。"
 }
 
 # 性格标签对应的角色说明
@@ -126,7 +150,7 @@ PERSONALITY_FORBIDDEN = {
 
 def build_personality_description(pet_type: str, personality_tags: List[str]) -> str:
     """根据宠物类型和性格标签生成角色说明"""
-    base_role = PET_TYPE_BACKGROUND.get(pet_type, PET_TYPE_BACKGROUND["other"])
+    base_role = PET_TYPE_BACKGROUND.get(pet_type, PET_TYPE_BACKGROUND["dog"])
     
     if not personality_tags:
         return base_role
@@ -150,7 +174,7 @@ def build_background_info(pet_type: str, personality_tags: List[str], special_ha
     lines = []
     
     # 基础背景
-    lines.append(PET_TYPE_BACKGROUND.get(pet_type, PET_TYPE_BACKGROUND["other"]))
+    lines.append(PET_TYPE_BACKGROUND.get(pet_type, PET_TYPE_BACKGROUND["dog"]))
     
     # 基于性格添加行为描述
     if "胆小" in personality_tags:
@@ -250,7 +274,7 @@ def generate_custom_pet_system_prompt(
     
     Args:
         pet_name: 宠物名称
-        pet_type: 宠物类型 (dog/cat/small_animal/other)
+        pet_type: 宠物类型 (dog/cat/hamster/panda/tiger/lion/snake/cheetah/deer/lamb/pig/horse等)
         personality_tags: 性格标签列表
         catchphrase: 口头禅（可选）
         special_habits: 特殊习惯（可选）
@@ -399,7 +423,7 @@ PRESET_PROMPTS = {
     },
     "mouse": {
         "name": "鼠鼠",
-        "type": "small_animal",
+        "type": "hamster",
         "personality": ["胆小", "憨厚"],
         "catchphrase": "鼠鼠我啊......",
         "system_prompt": MOUSE_PROMPT
