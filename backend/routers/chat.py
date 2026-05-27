@@ -95,8 +95,7 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
-        
-        # 获取 custom_pet_id（优先使用传入的参数）
+
         pet_id = custom_pet_id or session_dict.get("custom_pet_id")
 
         pet_prompts = {
@@ -108,44 +107,42 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
         pet_name = pet_info.PET_NAME if pet_info else "小可爱"
         system_prompt = ""
 
-        # 自定义宠物：使用 custom_pet_id 获取系统提示词
         if pet_type == "custom" and pet_id:
             custom_pet = custom_pets_storage.get(pet_id)
             if custom_pet:
                 pet_name = custom_pet.pet_name
                 system_prompt = custom_pet.system_prompt
             else:
-                # 如果找不到自定义宠物，使用默认提示
                 system_prompt = f"你是 {pet_name}，一只可爱的小宠物。"
 
         if not system_prompt:
             system_prompt = pet_info.get_system_prompt() if pet_info else "你是我的宠物。"
 
-        long_term_memories = await memory_service.get_long_term_memories(session_id)
-        long_term_text = "\n".join([m["summary"] for m in long_term_memories])
-
+        # 用户画像（8 字段全量注入）
         user_profile = await memory_service.get_user_profile(session_dict["user_id"]) or {}
-
-        short_term_messages = await memory_service.get_short_term_messages(session_id, limit=40)
-        conversation_text = "\n".join([
-            f"{'主人' if m.role == 'user' else pet_name}: {m.content}"
-            for m in short_term_messages
-        ])
+        profile_text = (
+            f"地区: {user_profile.get('region', '未知')}; "
+            f"身份: {user_profile.get('identity', '未知')}; "
+            f"职业: {user_profile.get('occupation', '未知')}; "
+            f"兴趣: {user_profile.get('interests', '未知')}; "
+            f"性格: {user_profile.get('personality_hint', '未知')}; "
+            f"活跃时段: {user_profile.get('active_hours', '未知')}; "
+            f"情绪倾向: {user_profile.get('mood_tendency', '未知')}; "
+            f"其他: {user_profile.get('extra_info', '未知')}"
+        )
 
         now = datetime.now()
         time_str = now.strftime("现在是%Y年%m月%d日 %H:%M")
+        intimacy_info = f"亲密度: {session_dict['intimacy']} ({get_intimacy_level(session_dict['intimacy'])}); 共聊天: {session_dict['total_chats']}轮"
 
-        context = {
+        return {
             "system_prompt": system_prompt,
             "pet_name": pet_name,
-            "long_term_memory": long_term_text or "（暂无长期记忆）",
-            "user_profile": f"地区: {user_profile.get('region', '未知')}; 身份: {user_profile.get('identity', '未知')}; 兴趣: {user_profile.get('interests', '未知')}",
-            "intimacy_info": f"亲密度: {session_dict['intimacy']} ({get_intimacy_level(session_dict['intimacy'])}); 共聊天: {session_dict['total_chats']}轮",
+            "user_profile": profile_text,
+            "intimacy_info": intimacy_info,
             "skills": f"当前时间: {time_str}",
-            "conversation": conversation_text or "（暂无对话）"
+            "user_id": session_dict["user_id"],
         }
-
-        return context
 
 
 async def execute_tools_and_build_final_prompt(
@@ -304,37 +301,70 @@ async def chat(session_id: str, request: ChatRequest):
 
     context = await build_context(session_id, pet_type, custom_pet_id)
     pet_name = context.get("pet_name", "小可爱")
-    
-    # 获取用户画像中的地区（作为备用提示给 Agent）
-    user_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
-    saved_region = user_profile.get("region") if user_profile else None
 
-    # 构建位置提示 - 让 LLM Agent 自己从对话中识别城市
-    if saved_region:
-        location_hint = f"（根据历史记录，用户可能在 {saved_region}）"
-    else:
-        location_hint = "（暂无用户位置信息）"
+    # --- 双通道 + 向量检索 ---
+    # 通道 A: 滑动窗口（最近 10 条）
+    recent_messages = await memory_service.get_short_term_messages(session_id, limit=10)
+    recent_ids = set(m.message_id for m in recent_messages)
+    recent_conversation = "\n".join([
+        f"{'主人' if m.role == 'user' else pet_name}: {m.content}"
+        for m in recent_messages
+    ]) or "（暂无对话）"
+
+    # 通道 B: 向量检索相关历史（top-5 消息）
+    related_memories = "（暂无相关记忆）"
+    if user_msg_embedding:
+        related = await embedding_service.search(
+            query_vector=user_msg_embedding,
+            session_id=session_id,
+            top_k=5,
+            source_type="message",
+            exclude_source_ids=list(recent_ids)
+        )
+        if related:
+            related_memories = "\n".join([
+                f"[相关记忆] {item['content'][:200]}"
+                for item in related
+            ])
+
+    # 长期记忆: 向量检索 top-3
+    long_term_memory = "（暂无长期记忆）"
+    if user_msg_embedding:
+        long_term_related = await embedding_service.search(
+            query_vector=user_msg_embedding,
+            session_id=session_id,
+            top_k=3,
+            source_type="long_term"
+        )
+        if long_term_related:
+            long_term_memory = "\n".join([
+                item["content"] for item in long_term_related
+            ])
+
+    # 位置提示
+    saved_region = user_profile.get("region") if (user_profile := await memory_service.get_user_profile(context.get("user_id", ""))) else None
+    location_hint = f"（根据历史记录，用户可能在 {saved_region}）" if saved_region else "（暂无用户位置信息）"
 
     skills_section = f"""{context['skills']}
 
 【可用工具】
 - query_weather: 查询天气
   用法: 当用户询问天气且你知道用户所在城市时调用
-  参数: location (城市名，支持全球城市，如"北京"、"东京"、"纽约"等)
+  参数: location (城市名，支持全球城市)
 
 【重要】
 Agent 需要自主从用户消息中识别位置信息：
-- 如果用户提到城市名（如"我在苏州"、"去北京"），请记住这个位置
+- 如果用户提到城市名，请记住这个位置
 - 如果用户询问天气但你不知道在哪，请先询问用户
 {location_hint}
 """
 
     full_prompt = f"""<system>
 {context['system_prompt']}
-:</system>
+</system>
 
 <long_term_memory>
-{context['long_term_memory']}
+{long_term_memory}
 </long_term_memory>
 
 <user_profile>
@@ -349,17 +379,22 @@ Agent 需要自主从用户消息中识别位置信息：
 {skills_section}
 </skills>
 
-<conversation>
-{context['conversation']}
+<recent_conversation>
+{recent_conversation}
+</recent_conversation>
 
+<related_memories>
+{related_memories}
+</related_memories>
+
+<current_message>
 主人: {request.content}
-</conversation>
+</current_message>
 
 【重要规则】
 1. 如果用户询问天气，你需要知道用户在哪：
-   - 如果 <skills> 中显示"用户地区: 未知"，请先询问用户所在城市
+   - 如果没有位置信息，请先询问用户所在城市
    - 如果用户指定了地点，使用用户指定的地点
-   - 如果有已知地区，使用已知地区
 2. 只有在知道用户所在城市后才能调用 query_weather 工具
 3. 如果需要调用工具，请在回复中包含：
    [TOOL_CALL]
