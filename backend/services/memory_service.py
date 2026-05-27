@@ -57,16 +57,19 @@ class MemoryService:
         pet_name: str
     ) -> Optional[str]:
         from backend.services.llm_service import llm_service
-        
+        from backend.services.embedding_service import embedding_service
+
         memory_id = str(uuid.uuid4())
         conversation_for_compress = [
             {"role": getattr(m, "role", m.get("role")), "content": getattr(m, "content", m.get("content"))}
-            for m in messages[:20]
+            for m in messages[:15]
         ]
-        
-        summary = await llm_service.compress_memory(conversation_for_compress, pet_name)
-        source_range = f"轮次1-{min(len(messages), 20)}"
-        
+
+        compressed = await llm_service.compress_memory(conversation_for_compress, pet_name)
+        summary = compressed["summary"]
+        importance = compressed.get("importance", 0.5)
+        source_range = f"轮次1-{min(len(messages), 15)}"
+
         async with get_db() as db:
             await db.execute(
                 """
@@ -76,8 +79,68 @@ class MemoryService:
                 (memory_id, session_id, summary, source_range, datetime.now())
             )
             await db.commit()
-        
+
+        # 为长期记忆生成向量
+        embedding = await embedding_service.embed(summary)
+        if embedding:
+            await embedding_service.save_vector(
+                session_id=session_id,
+                source_type="long_term",
+                source_id=memory_id,
+                content=summary,
+                embedding=embedding,
+                importance=importance
+            )
+
         return memory_id
+
+    async def detect_topic_change(self, recent_messages: List[Dict], current_message: str) -> bool:
+        """用 LLM 检测当前消息是否与最近对话话题不同"""
+        from backend.services.llm_service import llm_service
+
+        if len(recent_messages) < 2:
+            return False
+
+        recent_text = "\n".join([f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in recent_messages[-3:]])
+
+        prompt = f"""最近对话：
+{recent_text}
+
+当前消息：{current_message}
+
+当前消息是否和上面的对话是同一话题？只回答 YES 或 NO。"""
+
+        result = await llm_service.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=10,
+            caller="topic_detect"
+        )
+
+        if result:
+            return "NO" in result.strip().upper()
+        return False
+
+    async def should_compress(self, session_id: str, recent_messages: List[Dict], current_message: str) -> bool:
+        """判断是否需要触发长期记忆压缩"""
+        message_count = await self.get_message_count(session_id)
+
+        # 条件1: 兜底机制 - 每 20 轮
+        if message_count > 20 and message_count % 20 == 0:
+            return True
+
+        # 条件2: 滑动窗口外消息积压 > 30 条
+        short_term = await self.get_short_term_messages(session_id, limit=10)
+        if message_count - len(short_term) > 30:
+            return True
+
+        # 条件3: 话题变化检测
+        if len(recent_messages) >= 3:
+            topic_changed = await self.detect_topic_change(recent_messages, current_message)
+            if topic_changed:
+                return True
+
+        return False
 
     async def get_long_term_memories(self, session_id: str) -> List[Dict]:
         async with get_db() as db:
