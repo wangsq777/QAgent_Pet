@@ -324,6 +324,9 @@ PORT=10000
 - 新增Git同步工作流（.codebuddy/skills/project-sync + scripts/update_changelog.py）
 
 
+
+
+
 ## 未来展望
 
 - [ ] 支持更多宠物类型

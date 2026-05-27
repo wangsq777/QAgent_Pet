@@ -14,6 +14,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# Fix Unicode output on Windows GBK terminals
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -262,7 +269,11 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    print(result)
+    try:
+        print(result)
+    except UnicodeEncodeError:
+        # Fallback for terminals that can't handle Unicode
+        print(result.encode('ascii', errors='replace').decode('ascii'))
 
 
 if __name__ == "__main__":
