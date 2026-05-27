@@ -6,7 +6,7 @@ from backend.schemas import MessageResponse
 
 
 class MemoryService:
-    async def get_short_term_messages(self, session_id: str, limit: int = 40) -> List[MessageResponse]:
+    async def get_short_term_messages(self, session_id: str, limit: int = 10) -> List[MessageResponse]:
         async with get_db() as db:
             cursor = await db.execute(
                 """
