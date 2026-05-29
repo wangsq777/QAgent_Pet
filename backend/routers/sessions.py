@@ -414,6 +414,10 @@ async def get_memory_panel(session_id: str):
                 "region": user_profile.get("region"),
                 "identity": user_profile.get("identity"),
                 "interests": user_profile.get("interests", "").split(",") if user_profile.get("interests") else [],
+                "occupation": user_profile.get("occupation"),
+                "personality_hint": user_profile.get("personality_hint"),
+                "active_hours": user_profile.get("active_hours"),
+                "mood_tendency": user_profile.get("mood_tendency"),
                 "extra_info": user_profile.get("extra_info")
             }
         )
@@ -440,7 +444,11 @@ async def update_user_profile(session_id: str, request: UserProfileUpdateRequest
             "region": request.region if request.region else "未知",
             "identity": request.identity if request.identity else "未知",
             "interests": request.interests if request.interests else "未知",
-            "extra_info": request.extra_info
+            "occupation": request.occupation if request.occupation else "未知",
+            "personality_hint": request.personality_hint if request.personality_hint else "未知",
+            "active_hours": request.active_hours if request.active_hours else "未知",
+            "mood_tendency": request.mood_tendency if request.mood_tendency else "未知",
+            "extra_info": request.extra_info if request.extra_info else "未知"
         }
 
         await memory_service.save_user_profile(user_id, profile_data)

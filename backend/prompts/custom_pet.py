@@ -247,7 +247,7 @@ def build_output_requirements(personality_tags: List[str], catchphrase: str, sel
     
     # 口头禅
     if catchphrase:
-        requirements.append(f"口头禅是\"{catchphrase}\"")
+        requirements.append("口头禅由系统在对话时动态告知")
     
     # 禁止项
     for tag in personality_tags:

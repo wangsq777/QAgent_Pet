@@ -171,6 +171,10 @@ class MemoryService:
                     SET region = COALESCE(?, region),
                         identity = COALESCE(?, identity),
                         interests = COALESCE(?, interests),
+                        occupation = COALESCE(?, occupation),
+                        personality_hint = COALESCE(?, personality_hint),
+                        active_hours = COALESCE(?, active_hours),
+                        mood_tendency = COALESCE(?, mood_tendency),
                         extra_info = COALESCE(?, extra_info),
                         updated_at = ?
                     WHERE user_id = ?
@@ -179,6 +183,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         user_id
@@ -188,8 +196,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -197,6 +205,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()
@@ -225,28 +237,25 @@ class MemoryService:
             row = await existing.fetchone()
             
             if row:
-                existing_data = dict(row)
                 # 合并：只有新值非空才更新
-                new_region = profile_data.get("region")
-                new_identity = profile_data.get("identity")
-                new_interests = profile_data.get("interests")
-                new_extra_info = profile_data.get("extra_info")
+                field_map = {
+                    "region": profile_data.get("region"),
+                    "identity": profile_data.get("identity"),
+                    "interests": profile_data.get("interests"),
+                    "occupation": profile_data.get("occupation"),
+                    "personality_hint": profile_data.get("personality_hint"),
+                    "active_hours": profile_data.get("active_hours"),
+                    "mood_tendency": profile_data.get("mood_tendency"),
+                    "extra_info": profile_data.get("extra_info")
+                }
                 
                 update_fields = []
                 update_values = []
                 
-                if new_region is not None and new_region != "" and new_region != "null":
-                    update_fields.append("region = ?")
-                    update_values.append(new_region)
-                if new_identity is not None and new_identity != "" and new_identity != "null":
-                    update_fields.append("identity = ?")
-                    update_values.append(new_identity)
-                if new_interests is not None and new_interests != "" and new_interests != "null":
-                    update_fields.append("interests = ?")
-                    update_values.append(new_interests)
-                if new_extra_info is not None and new_extra_info != "" and new_extra_info != "null":
-                    update_fields.append("extra_info = ?")
-                    update_values.append(new_extra_info)
+                for field_name, new_value in field_map.items():
+                    if new_value is not None and new_value != "" and new_value != "null":
+                        update_fields.append(f"{field_name} = ?")
+                        update_values.append(new_value)
                 
                 if update_fields:
                     update_fields.append("updated_at = ?")
@@ -265,8 +274,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -274,6 +283,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()
@@ -298,13 +311,18 @@ class MemoryService:
                 await db.execute(
                     """
                     UPDATE user_profiles 
-                    SET region = ?, identity = ?, interests = ?, extra_info = ?, updated_at = ?
+                    SET region = ?, identity = ?, interests = ?, occupation = ?, personality_hint = ?,
+                        active_hours = ?, mood_tendency = ?, extra_info = ?, updated_at = ?
                     WHERE user_id = ?
                     """,
                     (
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         user_id
@@ -314,8 +332,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -323,6 +341,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()

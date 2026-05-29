@@ -36,6 +36,37 @@ def calculate_intimacy_change(emotion_tag: str) -> int:
     return 1
 
 
+def get_catchphrase(pet_type: str, custom_pet_id: str = None) -> str:
+    """获取宠物的口头禅文本"""
+    catchphrases = {
+        "hot_dog": "汪汪，我好想你。",
+        "cold_cat": "哼。本咪才不会关心你。",
+        "mouse": "鼠鼠我啊......"
+    }
+
+    if pet_type == "custom" and custom_pet_id:
+        custom_pet = custom_pets_storage.get(custom_pet_id)
+        if custom_pet:
+            return custom_pet.catchphrase
+
+    return catchphrases.get(pet_type, "")
+
+
+def detect_catchphrase_in_history(recent_messages: list, catchphrase: str) -> bool:
+    """
+    检测口头禅在最近消息中是否出现过
+    使用简单子串匹配，覆盖 LLM 可能的微调变体
+    """
+    if not catchphrase:
+        return False
+
+    for msg in recent_messages:
+        if msg.role == "assistant" and catchphrase in msg.content:
+            return True
+
+    return False
+
+
 async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
     """生成宠物分享日常的消息"""
     import random
@@ -311,6 +342,15 @@ async def chat(session_id: str, request: ChatRequest):
         for m in recent_messages
     ]) or "（暂无对话）"
 
+    # 口头禅概率控制
+    catchphrase = get_catchphrase(pet_type, custom_pet_id)
+    catchphrase_rule = ""
+    if catchphrase:
+        if detect_catchphrase_in_history(recent_messages, catchphrase):
+            catchphrase_rule = "7. 本次回复请不要使用口头禅。\n"
+        else:
+            catchphrase_rule = f"7. 本次回复请使用口头禅：'{catchphrase}'\n"
+
     # 通道 B: 向量检索相关历史（top-5 消息）
     related_memories = "（暂无相关记忆）"
     if user_msg_embedding:
@@ -403,7 +443,7 @@ Agent 需要自主从用户消息中识别位置信息：
 4. 如果用户的消息包含日程安排，在回复末尾添加：[SCHEDULE: 日程内容 | YYYY-MM-DD HH:MM]
 5. 如果没有日程或不需要工具，不要添加任何标记
 6. 调用工具后，系统会返回工具执行结果，请根据结果回复用户
-
+{catchphrase_rule}
 请用{pet_type}的性格风格回复，直接输出回复内容。"""
 
     reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")

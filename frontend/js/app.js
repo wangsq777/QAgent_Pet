@@ -406,15 +406,21 @@ class ChatApp {
             
             // 加载用户画像，确保空值/null显示为"未知"
             const profile = data.user_profile || {};
-            const region = (!profile.region || profile.region === '') ? '未知' : profile.region;
-            const identity = (!profile.identity || profile.identity === '') ? '未知' : profile.identity;
-            const interests = (profile.interests && profile.interests.length > 0) 
-                ? profile.interests.join('、') 
-                : '未知';
             
-            document.getElementById('profile-region').textContent = region;
-            document.getElementById('profile-identity').textContent = identity;
-            document.getElementById('profile-interests').textContent = interests;
+            // 处理 interests 可能是数组的情况
+            const formatProfileValue = (value) => {
+                if (!value || value === '') return '未知';
+                if (Array.isArray(value)) return value.join('、');
+                return value;
+            };
+            
+            const profileFields = ['region', 'identity', 'interests', 'occupation', 'personality_hint', 'active_hours', 'mood_tendency', 'extra_info'];
+            profileFields.forEach(field => {
+                const el = document.getElementById(`profile-${field}`);
+                if (el) {
+                    el.textContent = formatProfileValue(profile[field]);
+                }
+            });
         } catch (error) {
             console.error('加载记忆面板失败:', error);
         }
@@ -428,7 +434,12 @@ class ChatApp {
         const fieldLabels = {
             'region': '地区',
             'identity': '身份',
-            'interests': '兴趣'
+            'interests': '兴趣',
+            'occupation': '职业',
+            'personality_hint': '性格',
+            'active_hours': '活跃时段',
+            'mood_tendency': '情绪倾向',
+            'extra_info': '其他'
         };
         
         // 保存原始值用于取消
@@ -471,16 +482,18 @@ class ChatApp {
         const actionsEl = document.getElementById(`actions-${field}`);
         
         try {
-            const currentProfile = {
-                region: document.getElementById('profile-region').textContent,
-                identity: document.getElementById('profile-identity').textContent,
-                interests: document.getElementById('profile-interests').textContent,
-                extra_info: null
-            };
+            // 收集所有画像字段
+            const profileFields = ['region', 'identity', 'interests', 'occupation', 'personality_hint', 'active_hours', 'mood_tendency', 'extra_info'];
+            const currentProfile = {};
+            profileFields.forEach(f => {
+                const el = document.getElementById(`profile-${f}`);
+                if (el) {
+                    currentProfile[f] = el.textContent;
+                }
+            });
             
-            if (field === 'region') currentProfile.region = finalValue;
-            else if (field === 'identity') currentProfile.identity = finalValue;
-            else if (field === 'interests') currentProfile.interests = finalValue;
+            // 更新当前编辑字段的值
+            currentProfile[field] = finalValue;
             
             console.log('保存用户画像:', currentProfile);
             

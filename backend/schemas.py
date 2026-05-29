@@ -82,6 +82,10 @@ class UserProfileUpdateRequest(BaseModel):
     region: Optional[str] = None
     identity: Optional[str] = None
     interests: Optional[str] = None
+    occupation: Optional[str] = None
+    personality_hint: Optional[str] = None
+    active_hours: Optional[str] = None
+    mood_tendency: Optional[str] = None
     extra_info: Optional[str] = None
 
 
