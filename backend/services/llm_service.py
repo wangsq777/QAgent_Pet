@@ -163,15 +163,42 @@ class LLMService:
         print("[DEBUG] No schedule in message")
         return None
 
-    async def compress_memory(self, messages: List[Dict[str, str]], pet_name: str) -> str:
+    async def compress_memory(self, messages: List[Dict[str, str]], pet_name: str) -> Dict[str, Any]:
         conversation_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
-        prompt = f"""以下是一段你和主人之间的对话记录，请压缩成200字以内的摘要，保留关键信息和重要细节：
+        prompt = f"""以下是一段你和主人之间的对话记录，请压缩成200字以内的摘要，保留关键信息和重要细节。
+
+同时输出：
+1. summary: 对话摘要（200字以内）
+2. tags: 话题标签列表（如 ["weather", "sad", "work"]）
+3. importance: 重要性评分（0-1之间的小数，1表示非常重要）
+
+请用JSON格式输出：
+{{"summary": "摘要内容", "tags": ["标签1", "标签2"], "importance": 0.8}}
+
+对话记录：
 {conversation_text}
-直接输出摘要内容，不要任何解释。"""
+
+只输出JSON，不要任何解释。"""
 
         messages_list = [{"role": "user", "content": prompt}]
         result = await self.chat(messages_list, temperature=0.5, max_tokens=300)
-        return result or "对话摘要（内容已丢失）"
+
+        if result:
+            try:
+                cleaned = result.strip()
+                if cleaned.startswith("```"):
+                    match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', cleaned)
+                    cleaned = match.group(1) if match else result
+                data = json.loads(cleaned)
+                return {
+                    "summary": data.get("summary", result),
+                    "tags": data.get("tags", []),
+                    "importance": float(data.get("importance", 0.5))
+                }
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        return {"summary": result or "对话摘要（内容已丢失）", "tags": [], "importance": 0.5}
 
     async def extract_user_profile(self, user_message: str, conversation_history: str = "") -> Optional[Dict[str, Any]]:
         """

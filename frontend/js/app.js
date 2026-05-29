@@ -2,6 +2,7 @@ class ChatApp {
     constructor() {
         this.sessionId = localStorage.getItem('qagent_session_id');
         this.petType = localStorage.getItem('qagent_pet_type');
+        this.petTypeEmoji = localStorage.getItem('qagent_pet_type_emoji') || '🐾';
         this.welcomeMessage = JSON.parse(localStorage.getItem('qagent_welcome') || '{}');
         this.intimacy = parseInt(localStorage.getItem('qagent_intimacy') || '0');
         this.messages = [];
@@ -22,6 +23,80 @@ class ChatApp {
         this.bindEvents();
     }
 
+    // 宠物类型对应的 emoji
+    getPetEmoji(petType) {
+        const emojis = {
+            'hot_dog': '🐕',
+            'cold_cat': '🐱',
+            'mouse': '🐹',
+            'dog': '🐕',
+            'cat': '🐱',
+            'hamster': '🐹',
+            'panda': '🐼',
+            'tiger': '🐯',
+            'lion': '🦁',
+            'snake': '🐍',
+            'cheetah': '🐆',
+            'deer': '🦌',
+            'lamb': '🐑',
+            'pig': '🐷',
+            'horse': '🐴',
+            'rabbit': '🐰',
+            'bird': '🐦',
+            'fox': '🦊',
+            'bear': '🐻'
+        };
+        return emojis[petType] || '🐾';
+    }
+
+    // 宠物类型对应的预置头像图片路径
+    getPetPresetImage(petType) {
+        const presets = {
+            'hot_dog': 'images/hot_dog.png',
+            'cold_cat': 'images/cold_cat.png',
+            'mouse': 'images/mouse.png',
+            'dog': 'images/hot_dog.png',
+            'cat': 'images/cold_cat.png',
+            'hamster': 'images/mouse.png',
+            'panda': 'images/panda.png',
+            'tiger': 'images/tiger.png',
+            'lion': 'images/lion.png',
+            'snake': 'images/snake.png',
+            'cheetah': 'images/cheetah.png',
+            'deer': 'images/deer.png',
+            'lamb': 'images/lamb.png',
+            'pig': 'images/pig.png',
+            'horse': 'images/horse.png'
+        };
+        return presets[petType] || '';
+    }
+
+    // 宠物类型对应的颜色
+    getPetColor(petType) {
+        const colors = {
+            'hot_dog': '#ff6b6b',
+            'cold_cat': '#74b9ff',
+            'mouse': '#fdcb6e',
+            'dog': '#ff6b6b',
+            'cat': '#74b9ff',
+            'hamster': '#fdcb6e',
+            'panda': '#000000',
+            'tiger': '#ff9f43',
+            'lion': '#feca57',
+            'snake': '#26de81',
+            'cheetah': '#eb3b5a',
+            'deer': '#a55eea',
+            'lamb': '#dfe6e9',
+            'pig': '#fab1a0',
+            'horse': '#8e44ad',
+            'rabbit': '#fd79a8',
+            'bird': '#00cec9',
+            'fox': '#e17055',
+            'bear': '#cd6133'
+        };
+        return colors[petType] || '#a29bfe';
+    }
+
     renderPetInfo() {
         const petNames = {
             'hot_dog': 'Hot Dog',
@@ -29,30 +104,40 @@ class ChatApp {
             'mouse': '鼠鼠',
             'custom': localStorage.getItem('qagent_custom_pet_name') || '我的宠物'
         };
-        const petImages = {
-            'hot_dog': 'images/hot_dog.png',
-            'cold_cat': 'images/cold_cat.png',
-            'mouse': 'images/mouse.png',
-            'custom': 'images/custom_pet.svg'
-        };
-        const petColors = {
-            'hot_dog': '#ff6b6b',
-            'cold_cat': '#74b9ff',
-            'mouse': '#fdcb6e',
-            'custom': '#a29bfe'
-        };
 
-        const petName = petNames[this.petType] || 'Hot Dog';
-        const petImage = petImages[this.petType] || 'images/hot_dog.png';
+        const petName = petNames[this.petType] || localStorage.getItem('qagent_custom_pet_name') || '我的宠物';
+        const petEmoji = this.getPetEmoji(this.petType);
+        const petColor = this.getPetColor(this.petType);
+        const isCustom = this.petType === 'custom';
+        const customAvatar = isCustom ? localStorage.getItem('qagent_custom_avatar') : null;
         
         // 设置宠物名称
         document.getElementById('pet-name').textContent = petName;
         
-        // 设置宠物图片（替换 emoji）
+        // 设置宠物头像（自定义宠物: 自定义头像 > 预置图片 > emoji；内置宠物: 预置图片 > emoji）
         const petEmojiEl = document.getElementById('pet-emoji');
-        petEmojiEl.innerHTML = `<img src="${petImage}" alt="${petName}" class="pet-avatar-img">`;
+        let avatarSet = false;
         
-        document.getElementById('pet-color').style.background = petColors[this.petType] || '#ff6b6b';
+        if (customAvatar) {
+            petEmojiEl.innerHTML = `<img src="${customAvatar}" alt="${petName}" class="pet-avatar-img" style="width: 70px; height: 70px; object-fit: cover; border-radius: 50%;">`;
+            avatarSet = true;
+        }
+        
+        if (!avatarSet) {
+            // 对于内置宠物，直接用 petType 查预置图；对于自定义宠物，尝试从存储的数据中获取 pet_type
+            let presetImg = this.getPetPresetImage(this.petType);
+            if (!presetImg && isCustom) {
+                const storedPetType = localStorage.getItem('qagent_custom_pet') ? JSON.parse(localStorage.getItem('qagent_custom_pet')).pet_type : '';
+                presetImg = this.getPetPresetImage(storedPetType);
+            }
+            if (presetImg) {
+                petEmojiEl.innerHTML = `<img src="${presetImg}" alt="${petName}" class="pet-avatar-img" style="width: 70px; height: 70px; object-fit: cover; border-radius: 50%;">`;
+            } else {
+                petEmojiEl.innerHTML = `<span class="pet-emoji-text">${petEmoji}</span>`;
+            }
+        }
+        
+        document.getElementById('pet-color').style.background = petColor;
         document.getElementById('pet-color').textContent = petName;
         document.getElementById('header-pet-name').textContent = petName;
     }
@@ -136,17 +221,34 @@ class ChatApp {
 
         const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         
-        // 获取宠物图片路径
-        const petImages = {
-            'hot_dog': 'images/hot_dog.png',
-            'cold_cat': 'images/cold_cat.png',
-            'mouse': 'images/mouse.png',
-            'custom': 'images/custom_pet.svg'
-        };
-        const petImage = petImages[this.petType] || 'images/hot_dog.png';
+        // 获取宠物头像（自定义宠物: 自定义头像 > 预置图片 > emoji；内置宠物: 预置图片 > emoji）
+        const petEmoji = this.getPetEmoji(this.petType);
+        const isCustom = this.petType === 'custom';
+        const customAvatar = isCustom ? localStorage.getItem('qagent_custom_avatar') : null;
+        let avatarHtml;
+        if (customAvatar) {
+            avatarHtml = `<img src="${customAvatar}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
+        } else {
+            // 检查预置图片
+            let presetImg = this.getPetPresetImage(this.petType);
+            if (!presetImg && isCustom) {
+                const storedPetData = localStorage.getItem('qagent_custom_pet');
+                if (storedPetData) {
+                    try {
+                        const parsed = JSON.parse(storedPetData);
+                        presetImg = this.getPetPresetImage(parsed.pet_type) || '';
+                    } catch(e) {}
+                }
+            }
+            if (presetImg) {
+                avatarHtml = `<img src="${presetImg}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
+            } else {
+                avatarHtml = `<span class="pet-emoji-small">${petEmoji}</span>`;
+            }
+        }
         
         msgDiv.innerHTML = `
-            ${!isUser ? `<div class="pet-avatar"><img src="${petImage}" alt="宠物" class="pet-avatar-img"></div>` : ''}
+            ${!isUser ? `<div class="pet-avatar">${avatarHtml}</div>` : ''}
             <div class="message-content">
                 ${msg.is_proactive && !isUser ? '<span class="proactive-tag">主动关怀</span>' : ''}
                 <p>${this.escapeHtml(msg.content)}</p>
@@ -304,15 +406,21 @@ class ChatApp {
             
             // 加载用户画像，确保空值/null显示为"未知"
             const profile = data.user_profile || {};
-            const region = (!profile.region || profile.region === '') ? '未知' : profile.region;
-            const identity = (!profile.identity || profile.identity === '') ? '未知' : profile.identity;
-            const interests = (profile.interests && profile.interests.length > 0) 
-                ? profile.interests.join('、') 
-                : '未知';
             
-            document.getElementById('profile-region').textContent = region;
-            document.getElementById('profile-identity').textContent = identity;
-            document.getElementById('profile-interests').textContent = interests;
+            // 处理 interests 可能是数组的情况
+            const formatProfileValue = (value) => {
+                if (!value || value === '') return '未知';
+                if (Array.isArray(value)) return value.join('、');
+                return value;
+            };
+            
+            const profileFields = ['region', 'identity', 'interests', 'occupation', 'personality_hint', 'active_hours', 'mood_tendency', 'extra_info'];
+            profileFields.forEach(field => {
+                const el = document.getElementById(`profile-${field}`);
+                if (el) {
+                    el.textContent = formatProfileValue(profile[field]);
+                }
+            });
         } catch (error) {
             console.error('加载记忆面板失败:', error);
         }
@@ -326,7 +434,12 @@ class ChatApp {
         const fieldLabels = {
             'region': '地区',
             'identity': '身份',
-            'interests': '兴趣'
+            'interests': '兴趣',
+            'occupation': '职业',
+            'personality_hint': '性格',
+            'active_hours': '活跃时段',
+            'mood_tendency': '情绪倾向',
+            'extra_info': '其他'
         };
         
         // 保存原始值用于取消
@@ -369,16 +482,18 @@ class ChatApp {
         const actionsEl = document.getElementById(`actions-${field}`);
         
         try {
-            const currentProfile = {
-                region: document.getElementById('profile-region').textContent,
-                identity: document.getElementById('profile-identity').textContent,
-                interests: document.getElementById('profile-interests').textContent,
-                extra_info: null
-            };
+            // 收集所有画像字段
+            const profileFields = ['region', 'identity', 'interests', 'occupation', 'personality_hint', 'active_hours', 'mood_tendency', 'extra_info'];
+            const currentProfile = {};
+            profileFields.forEach(f => {
+                const el = document.getElementById(`profile-${f}`);
+                if (el) {
+                    currentProfile[f] = el.textContent;
+                }
+            });
             
-            if (field === 'region') currentProfile.region = finalValue;
-            else if (field === 'identity') currentProfile.identity = finalValue;
-            else if (field === 'interests') currentProfile.interests = finalValue;
+            // 更新当前编辑字段的值
+            currentProfile[field] = finalValue;
             
             console.log('保存用户画像:', currentProfile);
             

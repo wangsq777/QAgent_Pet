@@ -95,6 +95,17 @@ body {
     border-radius: 50%;
 }
 
+/* Emoji 头像样式 */
+.pet-emoji-text {
+    font-size: 70px;
+    display: inline-block;
+}
+
+.pet-emoji-small {
+    font-size: 36px;
+    display: inline-block;
+}
+
 #pet-name {
     font-size: 1.5rem;
     color: var(--text-primary);

@@ -21,6 +21,7 @@ async def init_database():
                 session_id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 pet_type TEXT NOT NULL CHECK(pet_type IN ('hot_dog', 'cold_cat', 'mouse', 'custom')),
+                custom_pet_id TEXT,
                 intimacy INTEGER DEFAULT 0,
                 total_chats INTEGER DEFAULT 0,
                 last_interaction_at DATETIME,
@@ -81,6 +82,37 @@ async def init_database():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+
+        # 新增：向量索引表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS memory_vectors (
+                vector_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                source_type TEXT NOT NULL CHECK(source_type IN ('message', 'long_term')),
+                source_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding TEXT NOT NULL,
+                importance REAL DEFAULT 0.5,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES pet_sessions(session_id)
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vectors_session ON memory_vectors(session_id)
+        """)
+
+        # 扩展 user_profiles 表
+        for col_sql in [
+            "ALTER TABLE user_profiles ADD COLUMN occupation TEXT",
+            "ALTER TABLE user_profiles ADD COLUMN personality_hint TEXT",
+            "ALTER TABLE user_profiles ADD COLUMN active_hours TEXT",
+            "ALTER TABLE user_profiles ADD COLUMN mood_tendency TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception:
+                pass
 
         await db.commit()
 

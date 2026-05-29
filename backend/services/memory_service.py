@@ -6,7 +6,7 @@ from backend.schemas import MessageResponse
 
 
 class MemoryService:
-    async def get_short_term_messages(self, session_id: str, limit: int = 40) -> List[MessageResponse]:
+    async def get_short_term_messages(self, session_id: str, limit: int = 10) -> List[MessageResponse]:
         async with get_db() as db:
             cursor = await db.execute(
                 """
@@ -57,16 +57,19 @@ class MemoryService:
         pet_name: str
     ) -> Optional[str]:
         from backend.services.llm_service import llm_service
-        
+        from backend.services.embedding_service import embedding_service
+
         memory_id = str(uuid.uuid4())
         conversation_for_compress = [
             {"role": getattr(m, "role", m.get("role")), "content": getattr(m, "content", m.get("content"))}
-            for m in messages[:20]
+            for m in messages[:15]
         ]
-        
-        summary = await llm_service.compress_memory(conversation_for_compress, pet_name)
-        source_range = f"轮次1-{min(len(messages), 20)}"
-        
+
+        compressed = await llm_service.compress_memory(conversation_for_compress, pet_name)
+        summary = compressed["summary"]
+        importance = compressed.get("importance", 0.5)
+        source_range = f"轮次1-{min(len(messages), 15)}"
+
         async with get_db() as db:
             await db.execute(
                 """
@@ -76,8 +79,68 @@ class MemoryService:
                 (memory_id, session_id, summary, source_range, datetime.now())
             )
             await db.commit()
-        
+
+        # 为长期记忆生成向量
+        embedding = await embedding_service.embed(summary)
+        if embedding:
+            await embedding_service.save_vector(
+                session_id=session_id,
+                source_type="long_term",
+                source_id=memory_id,
+                content=summary,
+                embedding=embedding,
+                importance=importance
+            )
+
         return memory_id
+
+    async def detect_topic_change(self, recent_messages: List[Dict], current_message: str) -> bool:
+        """用 LLM 检测当前消息是否与最近对话话题不同"""
+        from backend.services.llm_service import llm_service
+
+        if len(recent_messages) < 2:
+            return False
+
+        recent_text = "\n".join([f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in recent_messages[-3:]])
+
+        prompt = f"""最近对话：
+{recent_text}
+
+当前消息：{current_message}
+
+当前消息是否和上面的对话是同一话题？只回答 YES 或 NO。"""
+
+        result = await llm_service.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=10,
+            caller="topic_detect"
+        )
+
+        if result:
+            return "NO" in result.strip().upper()
+        return False
+
+    async def should_compress(self, session_id: str, recent_messages: List[Dict], current_message: str) -> bool:
+        """判断是否需要触发长期记忆压缩"""
+        message_count = await self.get_message_count(session_id)
+
+        # 条件1: 兜底机制 - 每 20 轮
+        if message_count > 20 and message_count % 20 == 0:
+            return True
+
+        # 条件2: 滑动窗口外消息积压 > 30 条
+        short_term = await self.get_short_term_messages(session_id, limit=10)
+        if message_count - len(short_term) > 30:
+            return True
+
+        # 条件3: 话题变化检测
+        if len(recent_messages) >= 3:
+            topic_changed = await self.detect_topic_change(recent_messages, current_message)
+            if topic_changed:
+                return True
+
+        return False
 
     async def get_long_term_memories(self, session_id: str) -> List[Dict]:
         async with get_db() as db:
@@ -108,6 +171,10 @@ class MemoryService:
                     SET region = COALESCE(?, region),
                         identity = COALESCE(?, identity),
                         interests = COALESCE(?, interests),
+                        occupation = COALESCE(?, occupation),
+                        personality_hint = COALESCE(?, personality_hint),
+                        active_hours = COALESCE(?, active_hours),
+                        mood_tendency = COALESCE(?, mood_tendency),
                         extra_info = COALESCE(?, extra_info),
                         updated_at = ?
                     WHERE user_id = ?
@@ -116,6 +183,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         user_id
@@ -125,8 +196,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -134,6 +205,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()
@@ -162,28 +237,25 @@ class MemoryService:
             row = await existing.fetchone()
             
             if row:
-                existing_data = dict(row)
                 # 合并：只有新值非空才更新
-                new_region = profile_data.get("region")
-                new_identity = profile_data.get("identity")
-                new_interests = profile_data.get("interests")
-                new_extra_info = profile_data.get("extra_info")
+                field_map = {
+                    "region": profile_data.get("region"),
+                    "identity": profile_data.get("identity"),
+                    "interests": profile_data.get("interests"),
+                    "occupation": profile_data.get("occupation"),
+                    "personality_hint": profile_data.get("personality_hint"),
+                    "active_hours": profile_data.get("active_hours"),
+                    "mood_tendency": profile_data.get("mood_tendency"),
+                    "extra_info": profile_data.get("extra_info")
+                }
                 
                 update_fields = []
                 update_values = []
                 
-                if new_region is not None and new_region != "" and new_region != "null":
-                    update_fields.append("region = ?")
-                    update_values.append(new_region)
-                if new_identity is not None and new_identity != "" and new_identity != "null":
-                    update_fields.append("identity = ?")
-                    update_values.append(new_identity)
-                if new_interests is not None and new_interests != "" and new_interests != "null":
-                    update_fields.append("interests = ?")
-                    update_values.append(new_interests)
-                if new_extra_info is not None and new_extra_info != "" and new_extra_info != "null":
-                    update_fields.append("extra_info = ?")
-                    update_values.append(new_extra_info)
+                for field_name, new_value in field_map.items():
+                    if new_value is not None and new_value != "" and new_value != "null":
+                        update_fields.append(f"{field_name} = ?")
+                        update_values.append(new_value)
                 
                 if update_fields:
                     update_fields.append("updated_at = ?")
@@ -202,8 +274,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -211,6 +283,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()
@@ -235,13 +311,18 @@ class MemoryService:
                 await db.execute(
                     """
                     UPDATE user_profiles 
-                    SET region = ?, identity = ?, interests = ?, extra_info = ?, updated_at = ?
+                    SET region = ?, identity = ?, interests = ?, occupation = ?, personality_hint = ?,
+                        active_hours = ?, mood_tendency = ?, extra_info = ?, updated_at = ?
                     WHERE user_id = ?
                     """,
                     (
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         user_id
@@ -251,8 +332,8 @@ class MemoryService:
                 profile_id = str(uuid.uuid4())
                 await db.execute(
                     """
-                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, extra_info, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -260,6 +341,10 @@ class MemoryService:
                         profile_data.get("region"),
                         profile_data.get("identity"),
                         profile_data.get("interests"),
+                        profile_data.get("occupation"),
+                        profile_data.get("personality_hint"),
+                        profile_data.get("active_hours"),
+                        profile_data.get("mood_tendency"),
                         profile_data.get("extra_info"),
                         datetime.now(),
                         datetime.now()

@@ -3,160 +3,367 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>创造你的专属宠物 - QAgent Pet</title>
+    <title>创建自定义宠物 - QAgent Pet</title>
     <link rel="stylesheet" href="css/styles.css">
-    <link rel="stylesheet" href="css/custom_pet.css">
+    <style>
+        .custom-pet-container {
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .form-section {
+            margin-bottom: 25px;
+        }
+        .form-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .form-section label {
+            display: block;
+            color: #666;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .form-section input[type="text"],
+        .form-section textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            box-sizing: border-box;
+        }
+        .form-section input[type="text"]:focus,
+        .form-section textarea:focus {
+            outline: none;
+            border-color: #6c5ce7;
+        }
+        .pet-type-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .pet-type-option {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .pet-type-option:hover {
+            border-color: #6c5ce7;
+        }
+        .pet-type-option.selected {
+            border-color: #6c5ce7;
+            background: #f8f7ff;
+        }
+        .pet-type-option .icon {
+            font-size: 30px;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .pet-type-option .name {
+            font-size: 14px;
+            color: #333;
+        }
+        .personality-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .personality-tag {
+            padding: 8px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        .personality-tag:hover {
+            border-color: #6c5ce7;
+        }
+        .personality-tag.selected {
+            border-color: #6c5ce7;
+            background: #6c5ce7;
+            color: white;
+        }
+        .preview-section {
+            background: #f8f7ff;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+        .preview-section h3 {
+            color: #6c5ce7;
+            margin-bottom: 15px;
+        }
+        .preview-content {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+        }
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        .btn-back {
+            flex: 1;
+            padding: 15px;
+            background: #e0e0e0;
+            color: #333;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-back:hover {
+            background: #d0d0d0;
+        }
+        .btn-create {
+            flex: 2;
+            padding: 15px;
+            background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .btn-create:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(108, 92, 231, 0.4);
+        }
+        .btn-create:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .tag-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+        /* 头像上传样式 */
+        .avatar-upload-section {
+            margin-top: 20px;
+        }
+        .avatar-preview-container {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-top: 10px;
+        }
+        .avatar-preview {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 3px solid #e0e0e0;
+        }
+        .avatar-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar-emoji {
+            font-size: 50px;
+        }
+        .avatar-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .avatar-upload-btn {
+            padding: 10px 20px;
+            background: #6c5ce7;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        .avatar-upload-btn:hover {
+            background: #5b4bc4;
+        }
+        .avatar-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 8px;
+        }
+        .expanded-pet-types {
+            background: #fafafa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 10px;
+            border: 1px dashed #ddd;
+        }
+        .pet-type-option.selected {
+            border-color: #6c5ce7;
+            background: #f8f7ff;
+        }
+        .pet-type-error {
+            color: #e74c3c;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
 </head>
 <body>
-    <div class="custom-pet-container">
-        <div class="header">
-            <h1>✨ 创造你的专属宠物</h1>
-            <p>为你的AI伙伴赋予独特的灵魂，打造最懂你的专属宠物！</p>
-        </div>
+    <div class="container">
+        <div class="custom-pet-container">
+            <div class="header" style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: #333;">✨ 创建你的专属宠物</h1>
+                <p>设定独一无二的名字和性格，打造最懂你的AI伙伴</p>
+            </div>
 
-        <div class="custom-pet-form">
-            <div class="form-section">
-                <h3>基本信息</h3>
-                
-                <div class="form-group">
-                    <label for="pet-name">宠物名字 <span class="required">*</span></label>
-                    <input type="text" id="pet-name" placeholder="给你的宠物起个名字..." maxlength="20" required>
-                    <span class="char-count"><span id="name-count">0</span>/20</span>
-                </div>
-
-                <div class="form-group">
-                    <label for="pet-type">宠物类型 <span class="required">*</span></label>
-                    <div class="type-grid">
-                        <button type="button" class="type-btn" data-type="dog">
-                            <span class="type-icon">🐕</span>
-                            <span class="type-name">小狗</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="cat">
-                            <span class="type-icon">🐱</span>
-                            <span class="type-name">小猫</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="rabbit">
-                            <span class="type-icon">🐰</span>
-                            <span class="type-name">小兔</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="bird">
-                            <span class="type-icon">🦜</span>
-                            <span class="type-name">小鸟</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="hamster">
-                            <span class="type-icon">🐹</span>
-                            <span class="type-name">仓鼠</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="fox">
-                            <span class="type-icon">🦊</span>
-                            <span class="type-name">小狐狸</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="bear">
-                            <span class="type-icon">🐻</span>
-                            <span class="type-name">小熊</span>
-                        </button>
-                        <button type="button" class="type-btn" data-type="panda">
-                            <span class="type-icon">🐼</span>
-                            <span class="type-name">小熊猫</span>
-                        </button>
+            <form id="customPetForm">
+                <div class="form-section">
+                    <h3>📛 基本信息</h3>
+                    <label for="petName">宠物名称 *</label>
+                    <input type="text" id="petName" name="petName" placeholder="给你的宠物起个名字" required maxlength="20">
+                    
+                    <!-- 头像上传 -->
+                    <div class="avatar-upload-section">
+                        <label>宠物头像（可选）</label>
+                        <div class="avatar-preview-container">
+                            <div class="avatar-preview" id="avatarPreview">
+                                <span class="avatar-emoji" id="avatarEmoji">🐕</span>
+                            </div>
+                            <div class="avatar-actions">
+                                <label class="avatar-upload-btn">
+                                    📷 上传图片
+                                    <input type="file" id="avatarInput" accept="image/*" style="display: none;">
+                                </label>
+                            </div>
+                        </div>
+                        <p class="avatar-hint">支持 JPG、PNG、GIF 格式，建议尺寸 200x200 像素</p>
                     </div>
                 </div>
-            </div>
 
-            <div class="form-section">
-                <h3>性格特点</h3>
-                <p class="section-hint">选择1-3个最能描述你宠物的性格标签</p>
-                
-                <div class="personality-grid">
-                    <button type="button" class="personality-btn" data-trait="热情活泼">
-                        <span class="trait-icon">🔥</span>
-                        <span class="trait-name">热情活泼</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="高冷傲娇">
-                        <span class="trait-icon">❄️</span>
-                        <span class="trait-name">高冷傲娇</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="温柔体贴">
-                        <span class="trait-icon">💕</span>
-                        <span class="trait-name">温柔体贴</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="调皮捣蛋">
-                        <span class="trait-icon">😈</span>
-                        <span class="trait-name">调皮捣蛋</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="聪明伶俐">
-                        <span class="trait-icon">🧠</span>
-                        <span class="trait-name">聪明伶俐</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="胆小害羞">
-                        <span class="trait-icon">😳</span>
-                        <span class="trait-name">胆小害羞</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="忠诚可靠">
-                        <span class="trait-icon">🛡️</span>
-                        <span class="trait-name">忠诚可靠</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="好奇宝宝">
-                        <span class="trait-icon">🔍</span>
-                        <span class="trait-name">好奇宝宝</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="话唠吐槽">
-                        <span class="trait-icon">💬</span>
-                        <span class="trait-name">话唠吐槽</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="安静陪伴">
-                        <span class="trait-icon">🌙</span>
-                        <span class="trait-name">安静陪伴</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="幽默搞笑">
-                        <span class="trait-icon">😄</span>
-                        <span class="trait-name">幽默搞笑</span>
-                    </button>
-                    <button type="button" class="personality-btn" data-trait="暖心治愈">
-                        <span class="trait-icon">☀️</span>
-                        <span class="trait-name">暖心治愈</span>
-                    </button>
+                <div class="form-section">
+                    <h3>🐾 宠物类型 *</h3>
+                    <div class="pet-type-grid">
+                        <div class="pet-type-option" data-type="dog" onclick="selectPetType('dog')">
+                            <img src="images/hot_dog.png" alt="小狗" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                            <span class="name">小狗</span>
+                        </div>
+                        <div class="pet-type-option" data-type="cat" onclick="selectPetType('cat')">
+                            <img src="images/cold_cat.png" alt="小猫" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                            <span class="name">小猫</span>
+                        </div>
+                        <div class="pet-type-option" data-type="hamster" onclick="selectPetType('hamster')">
+                            <img src="images/mouse.png" alt="小仓鼠" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                            <span class="name">小仓鼠</span>
+                        </div>
+                        <div class="pet-type-option" data-type="expand" onclick="toggleExpand()" id="expandBtn">
+                            <span class="icon">✨</span>
+                            <span class="name">更多</span>
+                        </div>
+                    </div>
+                    <!-- 展开的更多动物选项 -->
+                    <div class="expanded-pet-types" id="expandedPetTypes" style="display: none;">
+                        <div class="pet-type-grid" style="margin-top: 10px;">
+                        <div class="pet-type-option" data-type="panda" onclick="selectPetType('panda')">
+                            <img src="images/panda.png" alt="小熊猫" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                            <span class="name">小熊猫</span>
+                        </div>
+                        <div class="pet-type-option" data-type="tiger" onclick="selectPetType('tiger')">
+                            <img src="images/tiger.png" alt="小老虎" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                            <span class="name">小老虎</span>
+                        </div>
+                            <div class="pet-type-option" data-type="lion" onclick="selectPetType('lion')">
+                                <img src="images/lion.png" alt="小狮子" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小狮子</span>
+                            </div>
+                            <div class="pet-type-option" data-type="snake" onclick="selectPetType('snake')">
+                                <img src="images/snake.png" alt="小蛇" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小蛇</span>
+                            </div>
+                            <div class="pet-type-option" data-type="cheetah" onclick="selectPetType('cheetah')">
+                                <img src="images/cheetah.png" alt="小猎豹" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小猎豹</span>
+                            </div>
+                            <div class="pet-type-option" data-type="deer" onclick="selectPetType('deer')">
+                                <img src="images/deer.png" alt="小鹿" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小鹿</span>
+                            </div>
+                            <div class="pet-type-option" data-type="lamb" onclick="selectPetType('lamb')">
+                                <img src="images/lamb.png" alt="小羊" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小羊</span>
+                            </div>
+                            <div class="pet-type-option" data-type="pig" onclick="selectPetType('pig')">
+                                <img src="images/pig.png" alt="小猪" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小猪</span>
+                            </div>
+                            <div class="pet-type-option" data-type="horse" onclick="selectPetType('horse')">
+                                <img src="images/horse.png" alt="小马" class="icon preset-icon" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;">
+                                <span class="name">小马</span>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="petType" name="petType" value="dog">
+                    <p class="tag-hint" style="margin-top: 8px;">请选择一种动物类型 *</p>
                 </div>
-            </div>
 
-            <div class="form-section">
-                <h3>额外信息（可选）</h3>
-                
-                <div class="form-group">
-                    <label for="pet-catchphrase">口头禅</label>
-                    <input type="text" id="pet-catchphrase" placeholder="你的宠物有什么口头禅吗？" maxlength="50">
-                    <span class="char-count"><span id="catchphrase-count">0</span>/50</span>
+                <div class="form-section">
+                    <h3>💫 性格标签（可多选）</h3>
+                    <div class="personality-tags">
+                        <div class="personality-tag" data-tag="热情" onclick="toggleTag(this)">热情</div>
+                        <div class="personality-tag" data-tag="高冷" onclick="toggleTag(this)">高冷</div>
+                        <div class="personality-tag" data-tag="活泼" onclick="toggleTag(this)">活泼</div>
+                        <div class="personality-tag" data-tag="傲娇" onclick="toggleTag(this)">傲娇</div>
+                        <div class="personality-tag" data-tag="憨厚" onclick="toggleTag(this)">憨厚</div>
+                        <div class="personality-tag" data-tag="胆小" onclick="toggleTag(this)">胆小</div>
+                        <div class="personality-tag" data-tag="粘人" onclick="toggleTag(this)">粘人</div>
+                        <div class="personality-tag" data-tag="独立" onclick="toggleTag(this)">独立</div>
+                        <div class="personality-tag" data-tag="温柔" onclick="toggleTag(this)">温柔</div>
+                        <div class="personality-tag" data-tag="搞怪" onclick="toggleTag(this)">搞怪</div>
+                    </div>
+                    <p class="tag-hint">提示：选择1-3个性格标签最能展现宠物特色</p>
+                    <input type="hidden" id="personalityTags" name="personalityTags" value="">
                 </div>
 
-                <div class="form-group">
-                    <label for="pet-habits">特殊习惯</label>
-                    <textarea id="pet-habits" placeholder="描述一下你宠物的有趣小习惯..." rows="3" maxlength="200"></textarea>
-                    <span class="char-count"><span id="habits-count">0</span>/200</span>
+                <div class="form-section">
+                    <h3>💬 口头禅（可选）</h3>
+                    <label for="catchphrase">宠物说话时的标志性台词</label>
+                    <input type="text" id="catchphrase" name="catchphrase" placeholder="例如：主人！我爱你！" maxlength="30">
                 </div>
-            </div>
 
-            <div class="form-actions">
-                <button type="button" class="back-btn" onclick="goBack()">← 返回</button>
-                <button type="button" class="preview-btn" onclick="previewPet()">预览配置</button>
-                <button type="button" class="create-btn" onclick="createPet()">创造宠物</button>
-            </div>
-        </div>
+                <div class="form-section">
+                    <h3>🎭 特殊习惯（可选）</h3>
+                    <label for="specialHabits">描述宠物的独特行为或习惯</label>
+                    <textarea id="specialHabits" name="specialHabits" rows="3" placeholder="例如：每天早上会叫主人起床，喜欢在主人看书时趴在旁边"></textarea>
+                </div>
 
-        <!-- 预览弹窗 -->
-        <div id="preview-modal" class="modal" style="display: none;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>✨ 宠物配置预览</h3>
-                    <button class="close-btn" onclick="closePreview()">×</button>
+                <div class="preview-section">
+                    <h3>👁️ 预览</h3>
+                    <div class="preview-content" id="previewContent">
+                        填写上面的信息后，这里会显示宠物的性格预览...
+                    </div>
                 </div>
-                <div class="modal-body" id="preview-content">
-                    <!-- 预览内容将动态填充 -->
+
+                <div class="btn-group">
+                    <button type="button" class="btn-back" onclick="goBack()">返回</button>
+                    <button type="submit" class="btn-create" id="createBtn">✨ 开始聊天</button>
                 </div>
-                <div class="modal-footer">
-                    <button class="back-btn" onclick="closePreview()">继续调整</button>
-                    <button class="create-btn" onclick="confirmCreate()">确认创造</button>
-                </div>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -165,6 +372,321 @@
     </div>
 
     <script src="js/api.js"></script>
-    <script src="js/custom_pet.js"></script>
+    <script>
+        let selectedPetType = 'dog';
+        let selectedTags = [];
+        let isExpanded = false;
+        let customAvatarUrl = null;  // 存储自定义头像的 base64 数据
+
+        // 宠物类型对应的 emoji
+        const petTypeEmojis = {
+            'dog': '🐕',
+            'cat': '🐱',
+            'hamster': '🐹',
+            'panda': '🐼',
+            'tiger': '🐯',
+            'lion': '🦁',
+            'snake': '🐍',
+            'cheetah': '🐆',
+            'deer': '🦌',
+            'lamb': '🐑',
+            'pig': '🐷',
+            'horse': '🐴'
+        };
+
+        // 宠物类型对应的预置头像图片
+        const petTypePresetImages = {
+            'dog': 'images/hot_dog.png',
+            'cat': 'images/cold_cat.png',
+            'hamster': 'images/mouse.png',
+            'panda': 'images/panda.png',
+            'tiger': 'images/tiger.png',
+            'lion': 'images/lion.png',
+            'snake': 'images/snake.png',
+            'cheetah': 'images/cheetah.png',
+            'deer': 'images/deer.png',
+            'lamb': 'images/lamb.png',
+            'pig': 'images/pig.png',
+            'horse': 'images/horse.png'
+        };
+
+        // 头像上传处理
+        document.getElementById('avatarInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // 检查文件类型
+            if (!file.type.startsWith('image/')) {
+                alert('请上传图片文件！');
+                return;
+            }
+
+            // 检查文件大小 (最大 2MB)
+            if (file.size > 2 * 1024 * 1024) {
+                alert('图片大小不能超过 2MB！');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                customAvatarUrl = event.target.result;
+                const preview = document.getElementById('avatarPreview');
+                preview.innerHTML = `<img src="${customAvatarUrl}" alt="头像预览">`;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // 更新头像预览（显示预置图片或emoji）
+        function updateAvatarPreview() {
+            const preview = document.getElementById('avatarPreview');
+            const emojiSpan = document.getElementById('avatarEmoji');
+            const presetImage = petTypePresetImages[selectedPetType];
+            
+            if (presetImage) {
+                // 有预置图片，使用图片作为默认头像
+                emojiSpan.style.display = 'none';
+                // 检查是否已有img元素
+                let img = preview.querySelector('img.preset-avatar');
+                if (!img) {
+                    // 移除旧的emoji span，创建新img
+                    preview.innerHTML = `<img src="${presetImage}" alt="${selectedPetType}" class="preset-avatar" style="width: 100%; height: 100%; object-fit: cover;">`;
+                } else {
+                    img.src = presetImage;
+                    img.alt = selectedPetType;
+                }
+            } else {
+                // 无预置图片，显示emoji
+                const emoji = petTypeEmojis[selectedPetType] || '🐕';
+                emojiSpan.style.display = '';
+                emojiSpan.textContent = emoji;
+                // 移除img
+                const img = preview.querySelector('img.preset-avatar');
+                if (img) img.remove();
+            }
+        }
+
+        function toggleExpand() {
+            isExpanded = !isExpanded;
+            const expandedDiv = document.getElementById('expandedPetTypes');
+            const expandBtn = document.getElementById('expandBtn');
+            if (isExpanded) {
+                expandedDiv.style.display = 'block';
+                expandBtn.classList.add('selected');
+            } else {
+                expandedDiv.style.display = 'none';
+                expandBtn.classList.remove('selected');
+            }
+        }
+
+        function selectPetType(type) {
+            selectedPetType = type;
+            // 移除所有选中状态
+            document.querySelectorAll('.pet-type-option').forEach(el => {
+                el.classList.remove('selected');
+            });
+            // 添加选中状态到当前选项
+            const selectedEl = document.querySelector(`.pet-type-option[data-type="${type}"]`);
+            if (selectedEl) {
+                selectedEl.classList.add('selected');
+            }
+            document.getElementById('petType').value = type;
+            // 清除错误提示
+            const errorEl = document.getElementById('petTypeError');
+            if (errorEl) errorEl.style.display = 'none';
+            // 选择具体宠物类型后，收起展开的列表
+            if (type !== 'expand') {
+                collapsePetTypes();
+            }
+            // 更新头像预览（如果没有自定义头像）
+            if (!customAvatarUrl) {
+                updateAvatarPreview();
+            }
+            updatePreview();
+        }
+
+        // 收起宠物类型列表
+        function collapsePetTypes() {
+            isExpanded = false;
+            const expandedDiv = document.getElementById('expandedPetTypes');
+            const expandBtn = document.getElementById('expandBtn');
+            if (expandedDiv) {
+                expandedDiv.style.display = 'none';
+            }
+            if (expandBtn) {
+                expandBtn.classList.remove('selected');
+            }
+        }
+
+        function toggleTag(el) {
+            const tag = el.dataset.tag;
+            if (el.classList.contains('selected')) {
+                el.classList.remove('selected');
+                selectedTags = selectedTags.filter(t => t !== tag);
+            } else {
+                if (selectedTags.length < 3) {
+                    el.classList.add('selected');
+                    selectedTags.push(tag);
+                } else {
+                    alert('最多只能选择3个性格标签哦！');
+                }
+            }
+            document.getElementById('personalityTags').value = selectedTags.join(',');
+            updatePreview();
+        }
+
+        function updatePreview() {
+            const name = document.getElementById('petName').value || '你的宠物';
+            const catchphrase = document.getElementById('catchphrase').value;
+            const habits = document.getElementById('specialHabits').value;
+
+            const typeNames = {
+                'dog': '小狗',
+                'cat': '小猫',
+                'hamster': '小仓鼠',
+                'panda': '小熊猫',
+                'tiger': '小老虎',
+                'lion': '小狮子',
+                'snake': '小蛇',
+                'cheetah': '小猎豹',
+                'deer': '小鹿',
+                'lamb': '小羊',
+                'pig': '小猪',
+                'horse': '小马',
+                'expand': '更多动物'
+            };
+
+            const tagDescriptions = {
+                '热情': '超级热情、活泼、真诚，总是主动关心主人',
+                '高冷': '外表高冷，内心在意，说话简洁偶尔冷幽默',
+                '活泼': '超级活泼欢快，喜欢用感叹号，叽叽喳喳',
+                '傲娇': '嘴上不承认但实际很关心主人，别扭但真诚',
+                '憨厚': '老实憨厚、真诚，说话直接但有点笨拙',
+                '胆小': '胆子很小，容易紧张，说话小心翼翼',
+                '粘人': '渴望陪伴主人，不喜欢主人离开太久',
+                '独立': '有自己生活空间，不会过度依赖主人',
+                '温柔': '说话轻声细语，体贴关心，非常温暖',
+                '搞怪': '喜欢开玩笑，偶尔恶作剧，让人开心'
+            };
+
+            let preview = `<strong>${name}</strong> - ${typeNames[selectedPetType]}<br><br>`;
+
+            if (selectedTags.length > 0) {
+                preview += '<strong>性格特点：</strong><br>';
+                selectedTags.forEach(tag => {
+                    preview += `• ${tag}：${tagDescriptions[tag] || ''}<br>`;
+                });
+                preview += '<br>';
+            }
+
+            if (catchphrase) {
+                preview += `<strong>口头禅：</strong>"${catchphrase}"<br><br>`;
+            }
+
+            if (habits) {
+                preview += `<strong>特殊习惯：</strong>${habits}`;
+            }
+
+            if (selectedTags.length === 0 && !catchphrase && !habits) {
+                preview = '填写上面的信息后，这里会显示宠物的性格预览...';
+            }
+
+            document.getElementById('previewContent').innerHTML = preview;
+        }
+
+        document.getElementById('petName').addEventListener('input', updatePreview);
+        document.getElementById('catchphrase').addEventListener('input', updatePreview);
+        document.getElementById('specialHabits').addEventListener('input', updatePreview);
+
+        function goBack() {
+            window.location.href = 'index.html';
+        }
+
+        document.getElementById('customPetForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const name = document.getElementById('petName').value.trim();
+            if (!name) {
+                alert('请输入宠物名称');
+                return;
+            }
+            // 检查是否选择了有效动物类型（不能是expand）
+            if (selectedPetType === 'expand') {
+                alert('请选择一个具体的动物类型');
+                return;
+            }
+            if (selectedTags.length === 0) {
+                alert('请至少选择一个性格标签');
+                return;
+            }
+
+            const loading = document.getElementById('loading');
+            loading.style.display = 'flex';
+
+            try {
+                // 确保有 user_id
+                let userId = localStorage.getItem('qagent_user_id');
+                if (!userId) {
+                    userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('qagent_user_id', userId);
+                }
+
+                // 确定最终使用的头像：自定义上传 > 预置宠物图片 > 无
+                const finalAvatarUrl = customAvatarUrl || (petTypePresetImages[selectedPetType] || '');
+
+                const petData = {
+                    pet_name: name,
+                    pet_type: selectedPetType,
+                    personality_tags: selectedTags,
+                    catchphrase: document.getElementById('catchphrase').value.trim(),
+                    special_habits: document.getElementById('specialHabits').value.trim(),
+                    avatar_url: finalAvatarUrl  // 使用预置图片或自定义头像
+                };
+
+                // 1. 调用 API 创建自定义宠物
+                const petResponse = await API.createCustomPet(petData);
+
+                // 2. 调用 API 创建会话（使用 'custom' 类型和宠物ID）
+                const sessionResponse = await API.createSession(userId, 'custom', petResponse.pet_id);
+
+                // 3. 保存会话信息
+                localStorage.setItem('qagent_custom_pet', JSON.stringify(petData));
+                localStorage.setItem('qagent_pet_type', 'custom');
+                localStorage.setItem('qagent_pet_type_emoji', petTypeEmojis[selectedPetType] || '🐾');
+                localStorage.setItem('qagent_session_id', sessionResponse.session_id);
+                localStorage.setItem('qagent_custom_pet_id', petResponse.pet_id);
+                localStorage.setItem('qagent_custom_pet_name', name);
+                // 保存自定义/预置头像
+                if (finalAvatarUrl) {
+                    localStorage.setItem('qagent_custom_avatar', finalAvatarUrl);
+                } else {
+                    localStorage.removeItem('qagent_custom_avatar');
+                }
+
+                // 保存欢迎语
+                if (sessionResponse.welcome_message) {
+                    localStorage.setItem('qagent_welcome', JSON.stringify(sessionResponse.welcome_message));
+                } else {
+                    localStorage.setItem('qagent_welcome', JSON.stringify({
+                        role: 'assistant',
+                        content: `你好！我是${name}！${selectedTags.includes('热情') || selectedTags.includes('活泼') ? '超级开心能认识你！' : '很高兴见到你！'}`,
+                        created_at: new Date().toISOString()
+                    }));
+                }
+                localStorage.setItem('qagent_intimacy', sessionResponse.intimacy || '0');
+
+                // 4. 跳转到聊天页面
+                window.location.href = 'chat.html';
+
+            } catch (error) {
+                console.error('创建失败:', error);
+                alert('创建失败，请重试: ' + error.message);
+                loading.style.display = 'none';
+            }
+        });
+
+        selectPetType('dog');
+        // 初始化时设置预置图片
+        updateAvatarPreview();
+    </script>
 </body>
 </html>

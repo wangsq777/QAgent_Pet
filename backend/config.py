@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./qagent_pet.db"
     PORT: int = 10000
 
+    # Embedding API 配置（默认复用 LLM 的 base_url 和 key）
+    EMBEDDING_API_URL: str = ""
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
