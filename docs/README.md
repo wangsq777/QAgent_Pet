@@ -327,6 +327,16 @@ PORT=10000
 
 
 
+
+### 1.2.0 (2026-05-29)
+
+- **摘要**: 口头禅概率控制——代码层动态注入替代System Prompt硬编码
+- 新增get_catchphrase()/detect_catchphrase_in_history()滑动窗口检测
+- 4个Prompt文件口头禅改为'由系统动态告知'消除权威冲突
+- chat.py规则7动态注入具体口头禅文本或'请不要使用'
+- 前端chat.html/app.js UI优化
+- memory_service/sessions/schemas后端优化
+
 ## 未来展望
 
 - [ ] 支持更多宠物类型
