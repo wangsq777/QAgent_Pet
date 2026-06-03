@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>选择你的宠物伴侣 - QAgent Pet</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles.css?v=2">
     <style>
         .page-header {
             display: flex;
@@ -37,8 +37,8 @@
         }
         .pet-card.custom-pet-user {
             position: relative;
-            border: 2px dashed #9b59b6;
-            background: linear-gradient(135deg, #fef0ff 0%, #f8e8ff 100%);
+            border: 2px solid #a29bfe;
+            background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%) !important;
         }
         .pet-card.custom-pet-user .pet-emoji-icon {
             position: absolute;
@@ -47,10 +47,18 @@
             font-size: 35px;
         }
         .pet-card.custom-pet-user .pet-name {
-            color: #8e44ad;
+            color: #2c3e50;
+        }
+        .pet-card.custom-pet-user .pet-desc {
+            color: #7f8c8d;
         }
         .pet-card.custom-pet-user .pet-tag {
             background: linear-gradient(135deg, #9b59b6, #e74c3c);
+            color: white;
+        }
+        .pet-card.custom-pet-user .select-btn {
+            background: #a29bfe;
+            color: white;
         }
         .empty-custom-pets {
             grid-column: 1 / -1;
@@ -116,7 +124,7 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <script src="js/api.js"></script>
+    <script src="js/api.js?v=2"></script>
     <script>
         let userId = localStorage.getItem('qagent_user_id');
         if (!userId) {
@@ -183,9 +191,9 @@
                         const presetImg = petTypePresetImages[pet.pet_type] || '';
                         let avatarHtml;
                         if (pet.avatar_url) {
-                            avatarHtml = `<img src="${pet.avatar_url}" alt="${pet.pet_name}" class="pet-emoji" style="width: 60px; height: 60px; object-fit: cover; border-radius: 50%;">`;
+                            avatarHtml = `<img src="${pet.avatar_url}" alt="${pet.pet_name}" class="pet-emoji" style="width: 80px; height: 80px; object-fit: cover; border-radius: 50%;">`;
                         } else if (presetImg) {
-                            avatarHtml = `<img src="${presetImg}" alt="${pet.pet_name}" class="pet-emoji" style="width: 60px; height: 60px; object-fit: cover; border-radius: 50%;">`;
+                            avatarHtml = `<img src="${presetImg}" alt="${pet.pet_name}" class="pet-emoji" style="width: 80px; height: 80px; object-fit: cover; border-radius: 50%;">`;
                         } else {
                             avatarHtml = `<span style="font-size: 60px;">${emoji}</span>`;
                         }

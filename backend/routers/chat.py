@@ -10,7 +10,6 @@ from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
 from backend import prompts
-from backend.routers.custom_pets import custom_pets_storage
 from backend.services.embedding_service import embedding_service
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
@@ -44,12 +43,56 @@ def get_catchphrase(pet_type: str, custom_pet_id: str = None) -> str:
         "mouse": "鼠鼠我啊......"
     }
 
-    if pet_type == "custom" and custom_pet_id:
-        custom_pet = custom_pets_storage.get(custom_pet_id)
-        if custom_pet:
-            return custom_pet.catchphrase
+    if pet_type != "custom" or not custom_pet_id:
+        return catchphrases.get(pet_type, "")
 
+    # 同步辅助：从数据库查询（需要在异步上下文中调用 async 版本）
+    # 这里保留同步版本作为 fallback，实际调用优先用 get_catchphrase_async
     return catchphrases.get(pet_type, "")
+
+
+async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str:
+    """异步获取宠物的口头禅文本（从数据库查询自定义宠物）"""
+    catchphrases = {
+        "hot_dog": "汪汪，我好想你。",
+        "cold_cat": "哼。本咪才不会关心你。",
+        "mouse": "鼠鼠我啊......"
+    }
+
+    if pet_type != "custom" or not custom_pet_id:
+        return catchphrases.get(pet_type, "")
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT catchphrase FROM custom_pets WHERE pet_id = ?",
+            (custom_pet_id,)
+        )
+        row = await cursor.fetchone()
+
+    if row and row["catchphrase"]:
+        return row["catchphrase"]
+
+    return ""
+
+
+async def get_custom_pet_info(custom_pet_id: str) -> dict | None:
+    """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None"""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ?",
+            (custom_pet_id,)
+        )
+        row = await cursor.fetchone()
+
+    if not row:
+        return None
+
+    row_dict = dict(row)
+    return {
+        "pet_name": row_dict["pet_name"],
+        "system_prompt": row_dict["system_prompt"],
+        "catchphrase": row_dict["catchphrase"] or ""
+    }
 
 
 def detect_catchphrase_in_history(recent_messages: list, catchphrase: str) -> bool:
@@ -139,10 +182,10 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
         system_prompt = ""
 
         if pet_type == "custom" and pet_id:
-            custom_pet = custom_pets_storage.get(pet_id)
-            if custom_pet:
-                pet_name = custom_pet.pet_name
-                system_prompt = custom_pet.system_prompt
+            custom_pet_info = await get_custom_pet_info(pet_id)
+            if custom_pet_info:
+                pet_name = custom_pet_info["pet_name"]
+                system_prompt = custom_pet_info["system_prompt"]
             else:
                 system_prompt = f"你是 {pet_name}，一只可爱的小宠物。"
 
@@ -274,9 +317,9 @@ async def chat(session_id: str, request: ChatRequest):
         
         # 自定义宠物使用自定义名称
         if pet_type == "custom" and custom_pet_id:
-            custom_pet = custom_pets_storage.get(custom_pet_id)
-            if custom_pet:
-                pet_name = custom_pet.pet_name
+            custom_pet_info = await get_custom_pet_info(custom_pet_id)
+            if custom_pet_info:
+                pet_name = custom_pet_info["pet_name"]
 
         if session_dict["pet_status"] == "hiding":
             status_until = session_dict.get("status_until")
@@ -343,7 +386,7 @@ async def chat(session_id: str, request: ChatRequest):
     ]) or "（暂无对话）"
 
     # 口头禅概率控制
-    catchphrase = get_catchphrase(pet_type, custom_pet_id)
+    catchphrase = await get_catchphrase_async(pet_type, custom_pet_id)
     catchphrase_rule = ""
     if catchphrase:
         if detect_catchphrase_in_history(recent_messages, catchphrase):

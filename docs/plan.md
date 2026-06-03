@@ -1,90 +1,98 @@
-# 口头禅概率控制
-
-## 问题描述
-
-宠物 Agent 口头禅触发概率为 100%。以 Hot Dog 为例，每次回复都会包含"汪汪，我好想你"这个口头禅。需要让口头禅只在部分回复中出现，而不是每次都带。
-
-## 根因分析
-
-口头禅通过 System Prompt 的"输出要求"以绝对指令形式注入 LLM：
-
-```
-2. 口头禅是"汪汪，我好想你。"
-```
-
-LLM 将此理解为"每次回复都必须包含口头禅"，导致触发概率 100%。代码层面没有任何控制逻辑，完全依赖 LLM 自行决定。
-
-## 当前架构
-
-- **滑动窗口**：最近 10 条消息（约 5 轮对话）传给 LLM 作为上下文
-- **口头禅来源**：
-  - Hot Dog: `"汪汪，我好想你。"` → `hot_dog.py` System Prompt 第 39 行
-  - Cold Cat: `"哼。本咪才不会关心你。"` → `cold_cat.py` System Prompt 第 42 行
-  - 鼠鼠: `"鼠鼠我啊......"` → `mouse.py` System Prompt 第 43 行
-  - 自定义宠物: `custom_pets_storage[pet_id].catchphrase`
-- **Prompt 组装**：`chat.py` 第 362-407 行构建 full_prompt
-
-## 实现方案
-
-采用**方案 B：代码层面检测 + Prompt 动态注入**。
-
-### 核心思路
-
-保持 System Prompt 中口头禅定义不变（LLM 仍知道口头禅是什么），在 `chat.py` 中新增两个辅助函数，在构建 full_prompt 时根据滑动窗口中口头禅是否已出现过，动态追加精确指令。
-
-### 具体步骤
-
-1. **新增 `get_catchphrase()` 函数**：根据 pet_type 和 custom_pet_id 获取对应口头禅文本
-2. **新增 `detect_catchphrase_in_history()` 函数**：在最近 10 条 assistant 消息中检测口头禅是否出现过
-3. **修改 full_prompt 组装逻辑**：在【重要规则】区域动态追加：
-   - 口头禅在最近 10 条中出现过 → 追加 `本次回复请不要使用口头禅。`
-   - 口头禅未出现 → 追加 `本次回复请使用你的口头禅。`
-
-### 涉及文件
-
-仅修改 `backend/routers/chat.py`，不修改任何 Prompt 文件。
-
-### 边界情况
-
-- **首轮对话**：无历史消息 → 判定为"未出现过"，触发"请使用口头禅"
-- **自定义宠物无口头禅**：catchphrase 为空 → 跳过检测，不追加任何指令
-- **口头禅变体匹配**：使用简单子串匹配，覆盖 LLM 可能的微调变体
+# QAgent Pet 需求计划
 
 ---
 
-## 实现记录
+## ✅ 已实现：口头禅概率控制
 
-### 2026-05-29: 方案 B 已实现
+### 问题
 
-**修改文件**：仅 `backend/routers/chat.py`
+宠物 Agent 口头禅触发概率为 100%，每次回复都包含口头禅（如 Hot Dog 每次都说"汪汪，我好想你"），需要降低频率。
 
-**新增函数**：
-- `get_catchphrase(pet_type, custom_pet_id)`（行39-52）：返回宠物口头禅文本。内置三只宠物使用 System Prompt 中的精确口头禅，自定义宠物从 `custom_pets_storage[pet_id].catchphrase` 获取。
-- `detect_catchphrase_in_history(recent_messages, catchphrase)`（行55-67）：遍历最近 10 条消息中的 assistant 消息，使用子串匹配检测口头禅是否已出现。
+### 解决方法
 
-**修改点**：
-- `recent_conversation` 构建后（行345-352）：调用 `get_catchphrase()` + `detect_catchphrase_in_history()` 生成 `catchphrase_rule` 变量。
-- `【重要规则】` 区域（行446）：动态注入 `{catchphrase_rule}` —— 口头禅已出现则追加"本次回复请不要使用口头禅"，未出现则追加"本次回复请使用你的口头禅"；无口头禅时该行为空。
+采用**代码层面检测 + Prompt 动态注入**（方案 B）：
 
-**边界处理验证**：
-- 首轮对话（无历史）→ `detect_catchphrase_in_history` 返回 `False` → 规则 7 为"请使用口头禅" ✓
-- 自定义宠物无口头禅 → `get_catchphrase` 返回 `""` → `catchphrase_rule` 为 `""` → 不追加任何指令 ✓
-- 变体匹配 → 子串 `in` 匹配覆盖 LLM 微调 ✓
+1. 在 `chat.py` 中新增 `get_catchphrase()` 和 `detect_catchphrase_in_history()` 两个函数，检测最近 10 条 assistant 消息中口头禅是否已出现
+2. 消除 System Prompt 与动态规则的权威冲突——将 Prompt 文件中的 `口头禅是"XXX"` 改为 `口头禅由系统在对话时动态告知`
+3. 在 full_prompt 的【重要规则】区域动态追加指令：口头禅已出现 → `本次回复请不要使用口头禅`，未出现 → `本次回复请使用口头禅：'{具体文本}'`
 
-### 2026-05-29: 修复口头禅权威冲突问题
+### 最终效果
 
-**问题**：方案 B 实现后，口头禅仍然每轮都出现。原因是 System Prompt 中硬编码了"口头禅是'XXX'"（身份级权威），而动态规则 7 的"请不要使用口头禅"（编号级弱指令）无法对抗。
+- 口头禅不再每轮都出现，由代码精确控制频率
+- 首轮对话自动触发口头禅，后续轮次间隔出现
+- 覆盖 3 种预置宠物和自定义宠物
 
-**修复方案**：消除 System Prompt 与动态规则的权威冲突，改为单一信息源。
+### 修改文件
 
-**修改文件**：
-1. `backend/prompts/hot_dog.py` 第39行：`口头禅是"汪汪，我好想你。"` → `口头禅由系统在对话时动态告知`
-2. `backend/prompts/cold_cat.py` 第42行：`口头禅是"哼。本咪才不会关心你。"` → `口头禅由系统在对话时动态告知`
-3. `backend/prompts/mouse.py` 第43行：`口头禅是"鼠鼠我啊......"` → `口头禅由系统在对话时动态告知`
-4. `backend/prompts/custom_pet.py` 第249-250行：`口头禅是"{catchphrase}"` → `口头禅由系统在对话时动态告知`
-5. `backend/routers/chat.py` 第352行：规则 7 从 `"本次回复请使用你的口头禅"` → `"本次回复请使用口头禅：'{catchphrase}'"`（带上具体文本）
+- `backend/routers/chat.py`：新增辅助函数 + 动态注入逻辑
+- `backend/prompts/hot_dog.py`、`cold_cat.py`、`mouse.py`、`custom_pet.py`：消除硬编码权威冲突
 
-**核心改动逻辑**：
-- System Prompt 不再硬编码口头禅文本，只声明"口头禅由系统在对话时动态告知"
-- 口头禅的唯一信息源变为规则 7：未出现时注入具体文本 `"本次回复请使用口头禅：'汪汪，我好想你。'"`，已出现时注入 `"本次回复请不要使用口头禅。"`
-- LLM 无权威冲突，服从规则 7 即可
+---
+
+## ✅ 已实现：自定义宠物持久化存储
+
+### 问题
+
+用户创建自定义宠物后，退出浏览器再打开，自定义宠物消失。根因：`custom_pets_storage` 是纯内存字典，服务器重启后数据丢失。
+
+### 解决方法
+
+将存储从内存字典迁移到 SQLite 数据库：
+
+1. **`database.py`**：新增 `custom_pets` 表（含 `user_id` 隔离 + 索引）
+2. **`custom_pets.py`**：删除 `custom_pets_storage` 字典，5 个 API 接口全部改为 `get_db()` 数据库读写
+3. **`chat.py`**：新增 `get_catchphrase_async()` 和 `get_custom_pet_info()`，从数据库查询替代内存字典
+4. **`sessions.py`**：欢迎语生成改为从数据库查询
+
+### 最终效果
+
+- 自定义宠物数据持久化在 `qagent_pet.db`，重启/刷新不丢失
+- 支持用户隔离（`user_id` 字段）
+- 删除后聊天降级处理，不崩溃
+
+---
+
+## 📋 待实现：自定义宠物开场白 LLM 生成
+
+### 问题
+
+用户创建自定义宠物后，所有宠物的开场白都千篇一律。根因：`custom_pet.py` 的 `generate_welcome_messages()` 使用硬编码模板匹配，按性格标签返回固定 3 句话，完全没有 LLM 参与。例如所有"热情"标签的宠物开场白永远是 `"汪！主人！我等你好久啦！"`（狗味），无论实际是什么动物。
+
+对比：预置宠物（Hot Dog/Cold Cat/鼠鼠）的开场白通过 `llm_service.generate_welcome_message()` 调用 LLM 根据身份和性格动态生成，每次不同且贴合角色。
+
+### 当前架构
+
+```python
+# backend/prompts/custom_pet.py 第 359-405 行
+def generate_welcome_messages(pet_name, pet_type, personality_tags, catchphrase):
+    if "热情" in personality_tags or "活泼" in personality_tags:
+        welcomes = ["汪！主人！我等你好久啦！", ...]  # 硬编码，全是狗味
+    elif "高冷" in personality_tags or "傲娇" in personality_tags:
+        welcomes = ["哼...你来了啊。", ...]           # 硬编码
+    ...
+```
+
+调用链路：
+- `sessions.py` 创建会话时调用 `generate_welcome_messages()` → 取 `welcomes[0]`
+- `custom_pets.py` 预览时也调用同一函数
+
+### 实现方案
+
+1. **`backend/services/llm_service.py`**：扩展 `generate_welcome_message()` 支持自定义宠物参数
+   - 新增参数：`pet_type`（动物种类）、`personality_tags`（性格标签列表）、`catchphrase`（口头禅）
+   - 构建 Prompt：`"你是{pet_name}，一只{pet_type_display}，性格{tags}。请用你的风格写一句简短的欢迎主人的话（30字以内）。"`
+   
+2. **`backend/prompts/custom_pet.py`**：将 `generate_welcome_messages()` 改为调用 LLM
+   - 保留函数签名兼容性，内部改为调用 `llm_service.generate_welcome_message()`
+   - 或直接废弃该函数，让调用方直接使用 LLM 服务
+
+3. **`backend/routers/sessions.py`**（第 121-127 行）：将 `generate_welcome_messages()` 调用替换为 LLM 生成
+   
+4. **`backend/routers/custom_pets.py`**（第 149-154 行）：预览接口同步改为 LLM 生成
+
+### 边界情况
+
+- **LLM 不可用时降级**：保留现有硬编码模板作为 fallback
+- **生成失败重试**：最多重试 1 次
+- **超时控制**：欢迎语生成设置较短的 max_tokens（50），避免阻塞会话创建
+- **宠物类型映射**：将 `pet_type`（如 `hamster`、`fox`）映射为中文显示名传给 LLM

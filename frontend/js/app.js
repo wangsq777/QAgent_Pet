@@ -106,15 +106,25 @@ class ChatApp {
         };
 
         const petName = petNames[this.petType] || localStorage.getItem('qagent_custom_pet_name') || '我的宠物';
-        const petEmoji = this.getPetEmoji(this.petType);
-        const petColor = this.getPetColor(this.petType);
         const isCustom = this.petType === 'custom';
         const customAvatar = isCustom ? localStorage.getItem('qagent_custom_avatar') : null;
+        
+        // 获取自定义宠物的原始 pet_type（dog/cat/hamster 等），用于查找预置图和颜色
+        let rawPetType = '';
+        if (isCustom) {
+            try {
+                const stored = localStorage.getItem('qagent_custom_pet');
+                rawPetType = stored ? JSON.parse(stored).pet_type : '';
+            } catch(e) {}
+        }
+        
+        const petEmoji = this.getPetEmoji(isCustom ? rawPetType : this.petType);
+        const petColor = this.getPetColor(isCustom ? rawPetType : this.petType);
         
         // 设置宠物名称
         document.getElementById('pet-name').textContent = petName;
         
-        // 设置宠物头像（自定义宠物: 自定义头像 > 预置图片 > emoji；内置宠物: 预置图片 > emoji）
+        // 设置宠物头像（自定义宠物: 自定义头像 > 按 pet_type 查预置图 > emoji；内置宠物: 预置图片 > emoji）
         const petEmojiEl = document.getElementById('pet-emoji');
         let avatarSet = false;
         
@@ -124,12 +134,9 @@ class ChatApp {
         }
         
         if (!avatarSet) {
-            // 对于内置宠物，直接用 petType 查预置图；对于自定义宠物，尝试从存储的数据中获取 pet_type
-            let presetImg = this.getPetPresetImage(this.petType);
-            if (!presetImg && isCustom) {
-                const storedPetType = localStorage.getItem('qagent_custom_pet') ? JSON.parse(localStorage.getItem('qagent_custom_pet')).pet_type : '';
-                presetImg = this.getPetPresetImage(storedPetType);
-            }
+            // 对于内置宠物，直接用 petType 查预置图；对于自定义宠物，用 rawPetType 查预置图
+            const lookupType = isCustom ? rawPetType : this.petType;
+            const presetImg = this.getPetPresetImage(lookupType);
             if (presetImg) {
                 petEmojiEl.innerHTML = `<img src="${presetImg}" alt="${petName}" class="pet-avatar-img" style="width: 70px; height: 70px; object-fit: cover; border-radius: 50%;">`;
             } else {
@@ -221,25 +228,23 @@ class ChatApp {
 
         const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         
-        // 获取宠物头像（自定义宠物: 自定义头像 > 预置图片 > emoji；内置宠物: 预置图片 > emoji）
-        const petEmoji = this.getPetEmoji(this.petType);
+        // 获取宠物头像（自定义宠物: 自定义头像 > 按 pet_type 查预置图 > emoji；内置宠物: 预置图片 > emoji）
         const isCustom = this.petType === 'custom';
+        let rawPetType = '';
+        if (isCustom) {
+            try {
+                const stored = localStorage.getItem('qagent_custom_pet');
+                rawPetType = stored ? JSON.parse(stored).pet_type : '';
+            } catch(e) {}
+        }
+        const petEmoji = this.getPetEmoji(isCustom ? rawPetType : this.petType);
         const customAvatar = isCustom ? localStorage.getItem('qagent_custom_avatar') : null;
         let avatarHtml;
         if (customAvatar) {
             avatarHtml = `<img src="${customAvatar}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
         } else {
-            // 检查预置图片
-            let presetImg = this.getPetPresetImage(this.petType);
-            if (!presetImg && isCustom) {
-                const storedPetData = localStorage.getItem('qagent_custom_pet');
-                if (storedPetData) {
-                    try {
-                        const parsed = JSON.parse(storedPetData);
-                        presetImg = this.getPetPresetImage(parsed.pet_type) || '';
-                    } catch(e) {}
-                }
-            }
+            const lookupType = isCustom ? rawPetType : this.petType;
+            const presetImg = this.getPetPresetImage(lookupType);
             if (presetImg) {
                 avatarHtml = `<img src="${presetImg}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
             } else {

@@ -68,7 +68,7 @@ git diff HEAD
 
 **操作指令：**
 ```bash
-python scripts/update_changelog.py --readme docs/README.md --version "{新版本号}" --summary "{一行摘要}" --details "{要点1}；{要点2}；{要点3}"
+python scripts/update_changelog.py readme --path docs/README.md --version "{新版本号}" --summary "{一行摘要}" --details "{要点1}；{要点2}；{要点3}"
 ```
 
 该脚本会：
@@ -83,7 +83,7 @@ python scripts/update_changelog.py --readme docs/README.md --version "{新版本
 使用 Python 脚本追加修订记录：
 
 ```bash
-python scripts/update_changelog.py --revision docs/QAgent_Pet_需求实现文档.md --version "{新版本号}" --content "{简短修订描述}"
+python scripts/update_changelog.py revision --path docs/QAgent_Pet_需求实现文档.md --version "{新版本号}" --content "{简短修订描述}"
 ```
 
 然后**交互式引导用户**：

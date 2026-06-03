@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>创建自定义宠物 - QAgent Pet</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles.css?v=2">
     <style>
         .custom-pet-container {
             max-width: 700px;
@@ -371,7 +371,7 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <script src="js/api.js"></script>
+    <script src="js/api.js?v=2"></script>
     <script>
         let selectedPetType = 'dog';
         let selectedTags = [];
@@ -439,29 +439,15 @@
         // 更新头像预览（显示预置图片或emoji）
         function updateAvatarPreview() {
             const preview = document.getElementById('avatarPreview');
-            const emojiSpan = document.getElementById('avatarEmoji');
             const presetImage = petTypePresetImages[selectedPetType];
+            const emoji = petTypeEmojis[selectedPetType] || '🐕';
             
             if (presetImage) {
                 // 有预置图片，使用图片作为默认头像
-                emojiSpan.style.display = 'none';
-                // 检查是否已有img元素
-                let img = preview.querySelector('img.preset-avatar');
-                if (!img) {
-                    // 移除旧的emoji span，创建新img
-                    preview.innerHTML = `<img src="${presetImage}" alt="${selectedPetType}" class="preset-avatar" style="width: 100%; height: 100%; object-fit: cover;">`;
-                } else {
-                    img.src = presetImage;
-                    img.alt = selectedPetType;
-                }
+                preview.innerHTML = `<img src="${presetImage}" alt="${selectedPetType}" class="preset-avatar" style="width: 100%; height: 100%; object-fit: cover;">`;
             } else {
                 // 无预置图片，显示emoji
-                const emoji = petTypeEmojis[selectedPetType] || '🐕';
-                emojiSpan.style.display = '';
-                emojiSpan.textContent = emoji;
-                // 移除img
-                const img = preview.querySelector('img.preset-avatar');
-                if (img) img.remove();
+                preview.innerHTML = `<span class="avatar-emoji">${emoji}</span>`;
             }
         }
 
@@ -479,7 +465,12 @@
         }
 
         function selectPetType(type) {
+            console.log('[v2] selectPetType:', type);
             selectedPetType = type;
+            // 切换宠物类型时，重置自定义头像（因为新类型有自己的默认头像）
+            customAvatarUrl = null;
+            // 重置文件上传框
+            document.getElementById('avatarInput').value = '';
             // 移除所有选中状态
             document.querySelectorAll('.pet-type-option').forEach(el => {
                 el.classList.remove('selected');
@@ -497,10 +488,9 @@
             if (type !== 'expand') {
                 collapsePetTypes();
             }
-            // 更新头像预览（如果没有自定义头像）
-            if (!customAvatarUrl) {
-                updateAvatarPreview();
-            }
+            // 始终更新头像预览
+            console.log('[v2] calling updateAvatarPreview, selectedPetType=', selectedPetType, 'presetImage=', petTypePresetImages[selectedPetType]);
+            updateAvatarPreview();
             updatePreview();
         }
 
@@ -630,8 +620,9 @@
                     localStorage.setItem('qagent_user_id', userId);
                 }
 
-                // 确定最终使用的头像：自定义上传 > 预置宠物图片 > 无
-                const finalAvatarUrl = customAvatarUrl || (petTypePresetImages[selectedPetType] || '');
+                // 确定最终使用的头像：仅自定义上传的图片才作为 avatar_url
+                // 预置图片不存储，由前端根据 pet_type 动态匹配
+                const finalAvatarUrl = customAvatarUrl || '';
 
                 const petData = {
                     pet_name: name,

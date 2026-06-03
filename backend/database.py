@@ -69,6 +69,28 @@ async def init_database():
             )
         """)
 
+        # 自定义宠物表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS custom_pets (
+                pet_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                pet_name TEXT NOT NULL,
+                pet_type TEXT NOT NULL,
+                personality_tags TEXT NOT NULL,
+                catchphrase TEXT DEFAULT '',
+                special_habits TEXT DEFAULT '',
+                avatar_url TEXT DEFAULT '',
+                system_prompt TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_custom_pets_user ON custom_pets(user_id)
+        """)
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_profiles (
                 profile_id TEXT PRIMARY KEY,

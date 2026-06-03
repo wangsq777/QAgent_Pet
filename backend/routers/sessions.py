@@ -100,20 +100,33 @@ async def create_session(request: SessionCreateRequest):
 
     # 自定义宠物使用不同的欢迎语逻辑
     if pet_type == "custom" and custom_pet_id:
-        from backend.routers.custom_pets import custom_pets_storage
         from backend.prompts.custom_pet import generate_welcome_messages
-        
-        # 从 custom_pets_storage 获取真实配置
-        custom_pet = custom_pets_storage.get(custom_pet_id)
-        if custom_pet:
-            pet_name = custom_pet.pet_name
-            welcome_messages = generate_welcome_messages(
-                pet_name=pet_name,
-                pet_type=custom_pet.pet_type,
-                personality_tags=custom_pet.personality_tags,
-                catchphrase=custom_pet.catchphrase
-            )
-            welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是{pet_name}！"
+        from backend.routers.chat import get_custom_pet_info
+
+        # 从数据库获取自定义宠物配置
+        custom_pet_info = await get_custom_pet_info(custom_pet_id)
+        if custom_pet_info:
+            pet_name = custom_pet_info["pet_name"]
+            # 需要更多字段来生成欢迎语，查完整记录
+            async with get_db() as db:
+                cursor = await db.execute(
+                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ?",
+                    (custom_pet_id,)
+                )
+                row = await cursor.fetchone()
+            if row:
+                row_dict = dict(row)
+                import json
+                personality_tags = json.loads(row_dict["personality_tags"])
+                welcome_messages = generate_welcome_messages(
+                    pet_name=pet_name,
+                    pet_type=row_dict["pet_type"],
+                    personality_tags=personality_tags,
+                    catchphrase=row_dict["catchphrase"]
+                )
+                welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是{pet_name}！"
+            else:
+                welcome_content = f"你好！我是{pet_name}！"
         else:
             pet_name = request.nickname or "小可爱"
             welcome_content = f"你好！我是你的专属宠物{pet_name}！"
