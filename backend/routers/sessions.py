@@ -118,7 +118,7 @@ async def create_session(request: SessionCreateRequest):
                 row_dict = dict(row)
                 import json
                 personality_tags = json.loads(row_dict["personality_tags"])
-                welcome_messages = generate_welcome_messages(
+                welcome_messages = await generate_welcome_messages(
                     pet_name=pet_name,
                     pet_type=row_dict["pet_type"],
                     personality_tags=personality_tags,
@@ -164,7 +164,11 @@ async def get_session(session_id: str):
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        return dict(session)
+        session_dict = dict(session)
+        if session_dict.get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        return session_dict
 
 
 async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
@@ -231,6 +235,11 @@ async def share_daily(session_id: str):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
+
+        # Session 归属验证
+        if session_dict.get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
+
         pet_type = session_dict["pet_type"]
         pet_status = session_dict["pet_status"]
 
@@ -284,6 +293,11 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
+
+        # Session 归属验证
+        if session_dict.get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
+
         pet_type = session_dict["pet_type"]
         pet_status = session_dict["pet_status"]
         last_interaction = session_dict.get("last_interaction_at")
@@ -407,6 +421,10 @@ async def get_memory_panel(session_id: str):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
+
+        # Session 归属验证
+        if session_dict.get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
         intimacy = session_dict["intimacy"]
         total_chats = session_dict["total_chats"]
 
@@ -452,6 +470,10 @@ async def update_user_profile(session_id: str, request: UserProfileUpdateRequest
             raise HTTPException(status_code=404, detail="Session not found")
 
         user_id = dict(zip([d[0] for d in cursor.description], session))["user_id"]
+
+        # Session 归属验证
+        if user_id != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
 
         profile_data = {
             "region": request.region if request.region else "未知",

@@ -303,6 +303,11 @@ async def chat(session_id: str, request: ChatRequest):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
+
+        # Session 归属验证：当前阶段 user_id 统一为 "default_user"
+        if session_dict.get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
+
         pet_type = session_dict["pet_type"]
         custom_pet_id = session_dict.get("custom_pet_id")
 
@@ -608,5 +613,16 @@ Agent 需要自主从用户消息中识别位置信息：
 
 @router.get("/{session_id}/messages", response_model=MessageListResponse)
 async def get_messages(session_id: str):
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT user_id FROM pet_sessions WHERE session_id = ?",
+            (session_id,)
+        )
+        session = await cursor.fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if dict(session).get("user_id") != "default_user":
+            raise HTTPException(status_code=403, detail="Access denied")
+
     messages = await memory_service.get_short_term_messages(session_id, limit=100)
     return MessageListResponse(messages=messages, total=len(messages))
