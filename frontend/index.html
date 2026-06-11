@@ -72,6 +72,33 @@
             margin-bottom: 10px;
             opacity: 0.5;
         }
+        .delete-pet-btn {
+            display: inline-block;
+            padding: 6px 14px;
+            background: transparent;
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 8px;
+        }
+        .delete-pet-btn:hover {
+            background: #e74c3c;
+            color: white;
+        }
+        .delete-pet-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .pet-card.custom-pet-user .btn-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            margin-top: auto;
+        }
     </style>
 </head>
 <body>
@@ -206,7 +233,10 @@
                             <h2 class="pet-name">${pet.pet_name}</h2>
                             <span class="pet-tag">${typeName}</span>
                             <p class="pet-desc">${personalityStr ? '性格：' + personalityStr : '我的专属宠物'}</p>
-                            <button class="select-btn" onclick="selectCustomPet('${pet.pet_id}', '${pet.pet_name}', '${pet.avatar_url || ''}')">选择 ${pet.pet_name}</button>
+                            <div class="btn-group">
+                                <button class="select-btn" onclick="selectCustomPet('${pet.pet_id}', '${pet.pet_name}', '${pet.avatar_url || ''}')">选择 ${pet.pet_name}</button>
+                                <button class="delete-pet-btn" onclick="deletePet(event, '${pet.pet_id}', '${pet.pet_name}')">🗑 删除</button>
+                            </div>
                         `;
                         
                         petGrid.appendChild(petCard);
@@ -262,6 +292,55 @@
             } catch (error) {
                 alert('创建会话失败，请重试: ' + error.message);
                 loading.style.display = 'none';
+            }
+        }
+
+        // 删除自定义宠物
+        async function deletePet(event, petId, petName) {
+            event.stopPropagation();
+            if (!confirm(`确定要删除宠物「${petName}」吗？\n\n此操作不可撤销，所有聊天记录将被清除。`)) {
+                return;
+            }
+
+            // loading 状态
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '删除中...';
+
+            try {
+                await API.deleteCustomPet(petId);
+
+                // 从 DOM 移除卡片
+                const card = document.querySelector(`.pet-card[data-pet-id="${petId}"]`);
+                if (card) card.remove();
+
+                // 检查是否全部删除，恢复空状态
+                const remaining = document.querySelectorAll('.pet-card.custom-pet-user');
+                if (remaining.length === 0) {
+                    const petGrid = document.querySelector('.pet-grid');
+                    // 移除旧的空状态（如果存在）
+                    const oldEmpty = document.getElementById('emptyCustomPets');
+                    if (oldEmpty) oldEmpty.remove();
+                    const emptyMsg = document.createElement('div');
+                    emptyMsg.className = 'empty-custom-pets';
+                    emptyMsg.id = 'emptyCustomPets';
+                    emptyMsg.innerHTML = `
+                        <div class="icon">🐾</div>
+                        <p>还没有创建自定义宠物</p>
+                        <p style="font-size: 12px; margin-top: 5px;">点击右上角「创建自定义宠物」开始</p>
+                    `;
+                    petGrid.appendChild(emptyMsg);
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.textContent = '🗑 删除';
+                if (error.message.includes('404') || error.message.includes('不存在')) {
+                    // 宠物已被删除，直接移除卡片
+                    const card = document.querySelector(`.pet-card[data-pet-id="${petId}"]`);
+                    if (card) card.remove();
+                } else {
+                    alert('删除失败，请重试: ' + error.message);
+                }
             }
         }
 

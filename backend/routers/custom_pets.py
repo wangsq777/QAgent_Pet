@@ -338,22 +338,65 @@ async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
 
 
 @router.delete("/detail/{pet_id}")
-async def delete_custom_pet(pet_id: str):
+async def delete_custom_pet(pet_id: str, user_id: str = "default_user"):
     """
-    删除自定义宠物
+    删除自定义宠物及所有关联数据
+
+    安全校验：
+    - pet_id 必须以 custom_ 开头，防止误删预置宠物
+    - 按 user_id 查询，确保只能删除自己的宠物
+    - 级联清理 pet_sessions / messages / long_term_memories / schedules / memory_vectors
     """
+    if not pet_id.startswith("custom_"):
+        raise HTTPException(status_code=403, detail="预置宠物不支持删除")
+
     async with get_db() as db:
+        # 1. 安全校验：按 user_id 查询宠物
         cursor = await db.execute(
-            "SELECT pet_id FROM custom_pets WHERE pet_id = ?",
-            (pet_id,)
+            "SELECT pet_id FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+            (pet_id, user_id)
         )
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="宠物不存在")
 
+        # 2. 查找关联会话
+        cursor = await db.execute(
+            "SELECT session_id FROM pet_sessions WHERE custom_pet_id = ?",
+            (pet_id,)
+        )
+        session_rows = await cursor.fetchall()
+        session_ids = [dict(row)["session_id"] for row in session_rows]
+
+        # 3. 级联清理关联数据
+        if session_ids:
+            placeholders = ",".join(["?" for _ in session_ids])
+
+            await db.execute(
+                f"DELETE FROM messages WHERE session_id IN ({placeholders})",
+                session_ids
+            )
+            await db.execute(
+                f"DELETE FROM long_term_memories WHERE session_id IN ({placeholders})",
+                session_ids
+            )
+            await db.execute(
+                f"DELETE FROM schedules WHERE session_id IN ({placeholders})",
+                session_ids
+            )
+            await db.execute(
+                f"DELETE FROM memory_vectors WHERE session_id IN ({placeholders})",
+                session_ids
+            )
+            await db.execute(
+                f"DELETE FROM pet_sessions WHERE session_id IN ({placeholders})",
+                session_ids
+            )
+
+        # 4. 删除宠物记录
         await db.execute("DELETE FROM custom_pets WHERE pet_id = ?", (pet_id,))
         await db.commit()
 
-    return {"message": "删除成功"}
+    return {"message": "删除成功", "cleaned_sessions": len(session_ids)}
 
 
 @router.get("")

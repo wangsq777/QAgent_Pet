@@ -148,6 +148,19 @@ const API = {
         }
 
         return await response.json();
+    },
+
+    async deleteCustomPet(petId) {
+        const response = await fetch(`${API_BASE}/custom-pets/detail/${petId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '删除失败');
+        }
+
+        return await response.json();
     }
 };
 
