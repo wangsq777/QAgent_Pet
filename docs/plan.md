@@ -99,7 +99,7 @@ def generate_welcome_messages(pet_name, pet_type, personality_tags, catchphrase)
 
 ---
 
-## 📋 待实现：自定义宠物删除功能
+## ✅ 已实现：自定义宠物删除功能
 
 ### 问题
 
