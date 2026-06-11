@@ -11,6 +11,7 @@ from backend.database import init_database
 from backend.routers import sessions_router, chat_router
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.auth import AuthMiddleware
+from backend.config import settings
 
 
 @asynccontextmanager
@@ -28,12 +29,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.add_middleware(AuthMiddleware)
