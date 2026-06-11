@@ -8,6 +8,9 @@ import numpy as np
 
 from backend.config import settings
 from backend.database import get_db
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class EmbeddingService:
@@ -38,7 +41,7 @@ class EmbeddingService:
                 embedding = data["data"][0]["embedding"]
                 return embedding
         except Exception as e:
-            print(f"[EmbeddingService] embed failed: {e}")
+            logger.warning("embed failed: %s", e)
             return None
 
     @staticmethod

@@ -11,6 +11,9 @@ from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
 from backend import prompts
 from backend.services.embedding_service import embedding_service
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
 
@@ -239,15 +242,15 @@ async def execute_tools_and_build_final_prompt(
     for call in tool_calls:
         tool_name = call['tool']
         args = call['args']
-        print(f"[Tool] 调用工具: {tool_name}, 参数: {args}")
+        logger.info("调用工具: %s, 参数: %s", tool_name, args)
         
         result = await tool_executor.execute(tool_name, args)
         if result.success:
             tool_results[tool_name] = result.result
-            print(f"[Tool] {tool_name} 执行成功: {result.result}")
+            logger.info("%s 执行成功: %s", tool_name, result.result)
         else:
             tool_results[tool_name] = f"错误: {result.error}"
-            print(f"[Tool] {tool_name} 执行失败: {result.error}")
+            logger.warning("%s 执行失败: %s", tool_name, result.error)
     
     # 构建工具结果反馈 prompt
     tool_results_text = "\n".join([
@@ -353,7 +356,7 @@ async def chat(session_id: str, request: ChatRequest):
                     daily_content = await generate_share_daily_message(pet_type, pet_name)
                     await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
                     daily_share = {"role": "assistant", "content": daily_content}
-                    print(f"[DEBUG] Daily share triggered (cold_cat lazy): {daily_content}")
+                    logger.debug("Daily share triggered (cold_cat lazy): %s", daily_content)
                 
                 return ChatResponse(
                     reply="......",
@@ -532,7 +535,7 @@ Agent 需要自主从用户消息中识别位置信息：
                 (schedule_id, session_id, schedule_extracted["content"], schedule_extracted["scheduled_time"], 0, datetime.now())
             )
             await db.commit()
-        print(f"[DEBUG] Schedule saved: {schedule_extracted}")
+        logger.info("Schedule saved: %s", schedule_extracted)
 
     # 后台更新用户画像（使用用户画像总结 Agent）
     user_profile_updated = False
@@ -546,9 +549,9 @@ Agent 需要自主从用户消息中识别位置信息：
         if extracted_profile:
             await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
             user_profile_updated = True
-            print(f"[DEBUG] User profile updated by agent: {extracted_profile}")
+            logger.debug("User profile updated by agent: %s", extracted_profile)
     except Exception as e:
-        print(f"[DEBUG] User profile agent error: {e}")
+        logger.warning("User profile agent error: %s", e)
 
     emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
 
@@ -597,7 +600,7 @@ Agent 需要自主从用户消息中识别位置信息：
         daily_content = await generate_share_daily_message(pet_type, pet_name)
         await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
         daily_share = {"role": "assistant", "content": daily_content}
-        print(f"[DEBUG] Daily share triggered: {daily_content}")
+        logger.debug("Daily share triggered: %s", daily_content)
 
     return ChatResponse(
         reply=reply,

@@ -12,14 +12,17 @@ from backend.routers import sessions_router, chat_router
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.auth import AuthMiddleware
 from backend.config import settings
+from backend.logging_config import get_logger
+
+logger = get_logger("main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_database()
-    print("Database initialized")
+    logger.info("Database initialized")
     yield
-    print("Application shutdown")
+    logger.info("Application shutdown")
 
 
 app = FastAPI(

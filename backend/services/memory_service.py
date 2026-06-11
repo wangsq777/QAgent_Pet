@@ -3,6 +3,9 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from backend.database import get_db
 from backend.schemas import MessageResponse
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemoryService:
@@ -266,9 +269,9 @@ class MemoryService:
                         f"UPDATE user_profiles SET {', '.join(update_fields)} WHERE user_id = ?",
                         update_values
                     )
-                    print(f"[MemoryService] 用户画像已更新: {profile_data}")
+                    logger.debug("用户画像已更新: %s", profile_data)
                 else:
-                    print(f"[MemoryService] 用户画像无新数据，跳过更新")
+                    logger.debug("用户画像无新数据，跳过更新")
             else:
                 # 创建新记录
                 profile_id = str(uuid.uuid4())
@@ -292,7 +295,7 @@ class MemoryService:
                         datetime.now()
                     )
                 )
-                print(f"[MemoryService] 用户画像已创建: {profile_data}")
+                logger.debug("用户画像已创建: %s", profile_data)
             
             await db.commit()
 
@@ -351,7 +354,7 @@ class MemoryService:
                     )
                 )
             await db.commit()
-            print(f"[MemoryService] 用户画像已保存: {profile_data}")
+            logger.debug("用户画像已保存: %s", profile_data)
 
 
 memory_service = MemoryService()
