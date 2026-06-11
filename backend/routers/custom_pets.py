@@ -96,10 +96,11 @@ def _row_to_pet_response(row) -> CustomPetResponse:
 # ============ API 接口 ============
 
 @router.get("/templates", response_model=PetTemplateListResponse)
-async def get_pet_templates(user_id: str = "default_user"):
+async def get_pet_templates():
     """
     获取所有可选的宠物模板（预置 + 用户自定义）
     """
+    user_id = "default_user"
     presets = []
     for pet_type, preset in PRESET_PROMPTS.items():
         presets.append(PetTemplateResponse(
@@ -146,7 +147,7 @@ async def preview_custom_pet(request: CustomPetPreviewRequest):
         special_habits=request.special_habits
     )
 
-    welcome_messages = generate_welcome_messages(
+    welcome_messages = await generate_welcome_messages(
         pet_name=request.pet_name,
         pet_type=request.pet_type,
         personality_tags=request.personality_tags,
@@ -165,11 +166,12 @@ async def preview_custom_pet(request: CustomPetPreviewRequest):
 
 
 @router.post("", response_model=CustomPetResponse, status_code=201)
-async def create_custom_pet(request: CustomPetCreateRequest, user_id: str = "default_user"):
+async def create_custom_pet(request: CustomPetCreateRequest):
     """
     创建自定义宠物
     保存用户自定义宠物的完整配置到数据库
     """
+    user_id = "default_user"
     is_valid, error = validate_pet_config(request)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error)
@@ -255,10 +257,11 @@ async def get_custom_pet(pet_id: str):
 
 
 @router.put("/detail/{pet_id}", response_model=CustomPetResponse)
-async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest, user_id: str = "default_user"):
+async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
     """
     更新自定义宠物配置
     """
+    user_id = "default_user"
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM custom_pets WHERE pet_id = ?",
@@ -354,10 +357,11 @@ async def delete_custom_pet(pet_id: str):
 
 
 @router.get("")
-async def list_custom_pets(user_id: str = "default_user"):
+async def list_custom_pets():
     """
     列出用户所有自定义宠物
     """
+    user_id = "default_user"
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM custom_pets WHERE user_id = ? ORDER BY created_at DESC",

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router
 from backend.routers.custom_pets import router as custom_pets_router
+from backend.auth import AuthMiddleware
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(AuthMiddleware)
 
 app.include_router(sessions_router)
 app.include_router(chat_router)

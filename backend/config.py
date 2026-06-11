@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./qagent_pet.db"
     PORT: int = 10000
 
+    # API 认证
+    API_KEY: str = ""  # 为空时跳过认证（开发模式）
+
     # Embedding API 配置（默认复用 LLM 的 base_url 和 key）
     EMBEDDING_API_URL: str = ""
     EMBEDDING_API_KEY: str = ""
