@@ -7,6 +7,14 @@ from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass
 
 
+# 工具参数验证规则
+TOOL_ARG_SCHEMAS = {
+    "query_weather": {
+        "location": {"type": str, "max_length": 50, "pattern": r'^[一-龥a-zA-Z\s\-]+$'}
+    }
+}
+
+
 @dataclass
 class ToolResult:
     """工具执行结果"""
@@ -17,19 +25,32 @@ class ToolResult:
 
 class ToolExecutor:
     """工具调用执行器"""
-    
+
     def __init__(self):
         self._tools: Dict[str, Callable] = {}
-    
+
     def register(self, name: str, func: Callable):
         """注册工具"""
         self._tools[name] = func
-    
+
     async def execute(self, tool_name: str, args: Dict[str, Any]) -> ToolResult:
         """执行工具调用"""
         if tool_name not in self._tools:
             return ToolResult(success=False, error=f"未知工具: {tool_name}")
-        
+
+        # 参数验证
+        schema = TOOL_ARG_SCHEMAS.get(tool_name)
+        if schema:
+            for key, rules in schema.items():
+                if key in args:
+                    value = args[key]
+                    if not isinstance(value, rules["type"]):
+                        return ToolResult(False, None, f"参数类型错误: {key}")
+                    if len(str(value)) > rules.get("max_length", 100):
+                        return ToolResult(False, None, f"参数过长: {key}")
+                    if "pattern" in rules and not re.match(rules["pattern"], str(value)):
+                        return ToolResult(False, None, f"参数格式非法: {key}")
+
         try:
             func = self._tools[tool_name]
             # 支持异步和同步函数
