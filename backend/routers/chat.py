@@ -11,11 +11,15 @@ from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
 from backend import prompts
 from backend.services.embedding_service import embedding_service
+from backend.prompts.custom_pet import _sanitize_user_input
 from backend.logging_config import get_logger
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
+limiter = Limiter(key_func=get_remote_address)
 
 # 注册工具
 tool_executor.register("query_weather", weather_service.query_weather_tool)
@@ -294,6 +298,7 @@ async def execute_tools_and_build_final_prompt(
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
+@limiter.limit("10/minute")
 async def chat(session_id: str, request: ChatRequest):
     async with get_db() as db:
         cursor = await db.execute(
@@ -372,6 +377,9 @@ async def chat(session_id: str, request: ChatRequest):
 
     # 为用户消息生成向量（异步，失败不影响主流程）
     user_msg_embedding = await embedding_service.embed(request.content)
+
+    # 对用户输入做安全过滤，防止 prompt 注入
+    sanitized_content = _sanitize_user_input(request.content)
     if user_msg_embedding:
         await embedding_service.save_vector(
             session_id=session_id,
@@ -479,7 +487,7 @@ Agent 需要自主从用户消息中识别位置信息：
 </related_memories>
 
 <current_message>
-主人: {request.content}
+主人: {sanitized_content}
 </current_message>
 
 【重要规则】

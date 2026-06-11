@@ -3,11 +3,30 @@
 根据用户配置生成宠物的 System Prompt
 """
 
+import re
 from typing import List, Optional, Dict, Any
 from .hot_dog import SYSTEM_PROMPT as HOT_DOG_PROMPT, CATCH_PHRASE as HOT_DOG_CATCH
 from .cold_cat import SYSTEM_PROMPT as COLD_CAT_PROMPT, CATCH_PHRASE as COLD_CAT_CATCH
 from .mouse import SYSTEM_PROMPT as MOUSE_PROMPT, CATCH_PHRASE as MOUSE_CATCH
 from backend.services.llm_service import llm_service
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+def _sanitize_user_input(text: str) -> str:
+    """过滤用户输入中的指令分隔符，防止 prompt 注入"""
+    if not text:
+        return text
+    # 移除 XML 标签
+    text = re.sub(r'</?\w+[^>]*>', '', text)
+    # 移除工具调用标记
+    text = text.replace('[TOOL_CALL]', '').replace('[/TOOL_CALL]', '')
+    text = text.replace('[SCHEDULE:', '').replace('<system>', '').replace('</system>', '')
+    text = text.replace('<long_term_memory>', '').replace('</long_term_memory>', '')
+    text = text.replace('<user_profile>', '').replace('</user_profile>', '')
+    text = text.replace('<current_message>', '').replace('</current_message>', '')
+    return text.strip()
 
 
 # 宠物类型对应的自称
@@ -215,7 +234,7 @@ def build_background_info(pet_type: str, personality_tags: List[str], special_ha
     
     # 特殊习惯
     if special_habits:
-        lines.append(f"你的特殊习惯：{special_habits}")
+        lines.append(f"你的特殊习惯：{_sanitize_user_input(special_habits)}")
     
     return "\n- ".join(lines)
 
@@ -403,19 +422,18 @@ async def generate_welcome_messages(
     async def _generate_one(attempt: int) -> Optional[str]:
         """生成单条欢迎语，失败返回 None"""
         try:
-            print(f"[CustomPet] LLM 生成欢迎语 #{attempt}: "
-                  f"pet_name={pet_name}, pet_type={pet_type}({pet_type_display}), "
-                  f"personality={personality_tags}, catchphrase={catchphrase}")
+            logger.debug("LLM 生成欢迎语 #%d: pet_name=%s, pet_type=%s(%s), personality=%s, catchphrase=%s",
+                         attempt, pet_name, pet_type, pet_type_display, personality_tags, catchphrase)
             result = await llm_service.generate_custom_welcome_message(
                 pet_name=pet_name,
                 pet_type_display=pet_type_display,
                 personality_tags=personality_tags,
                 catchphrase=catchphrase
             )
-            print(f"[CustomPet] LLM #{attempt} 返回: {repr(result)}")
+            logger.debug("LLM #%d 返回: %s", attempt, repr(result))
             return result if result else None
         except Exception as e:
-            print(f"[CustomPet] LLM #{attempt} 失败: {e}")
+            logger.warning("LLM #%d 失败: %s", attempt, e)
             return None
 
     # 并发调用 2 次，每次生成不同的欢迎语
@@ -423,11 +441,11 @@ async def generate_welcome_messages(
     welcomes = [r for r in results if r]
 
     if welcomes:
-        print(f"[CustomPet] ✓ LLM 成功生成 {len(welcomes)} 条欢迎语")
+        logger.info("LLM 成功生成 %d 条欢迎语", len(welcomes))
         return welcomes
 
     # --- Fallback: LLM 完全不可用时使用通用模板 ---
-    print(f"[CustomPet] ✗ LLM 全部失败，使用 fallback 模板")
+    logger.warning("LLM 全部失败，使用 fallback 模板")
     self_name = PET_SELF_NAMES.get(pet_type, "我")
     greeting = PET_TYPE_GREETINGS.get(pet_type, "嗨")
 
