@@ -4,15 +4,19 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.auth import AuthMiddleware
 from backend.config import settings
 from backend.logging_config import get_logger
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 logger = get_logger("main")
 
@@ -42,6 +46,21 @@ app.add_middleware(
 )
 
 app.add_middleware(AuthMiddleware)
+
+# 请求体大小限制（1MB）
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > 1024 * 1024:  # 1MB
+            raise HTTPException(status_code=413, detail="Request too large")
+        return await call_next(request)
+
+app.add_middleware(MaxBodySizeMiddleware)
+
+# 速率限制
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(sessions_router)
 app.include_router(chat_router)
