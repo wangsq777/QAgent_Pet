@@ -3,6 +3,23 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Workaround: starlette.Config 在 Windows 默认用 GBK 编码打开 .env 文件，
+# 如果 .env 包含中文注释会抛出 UnicodeDecodeError。猴子补丁强制使用 UTF-8。
+import starlette.config as _sc
+_raw_read_file = _sc.Config._read_file
+def _utf8_read_file(self, file_name):
+    file_values = {}
+    with open(file_name, encoding="utf-8") as input_file:
+        for line in input_file.readlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip("\"'")
+                file_values[key] = value
+    return file_values
+_sc.Config._read_file = _utf8_read_file
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +75,7 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
 app.add_middleware(MaxBodySizeMiddleware)
 
 # 速率限制
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

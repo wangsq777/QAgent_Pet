@@ -13,13 +13,10 @@ from backend import prompts
 from backend.services.embedding_service import embedding_service
 from backend.prompts.custom_pet import _sanitize_user_input
 from backend.logging_config import get_logger
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
-limiter = Limiter(key_func=get_remote_address)
 
 # 注册工具
 tool_executor.register("query_weather", weather_service.query_weather_tool)
@@ -298,7 +295,6 @@ async def execute_tools_and_build_final_prompt(
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
-@limiter.limit("10/minute")
 async def chat(session_id: str, request: ChatRequest):
     async with get_db() as db:
         cursor = await db.execute(
