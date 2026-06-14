@@ -2,6 +2,16 @@ import httpx
 import json
 import re
 from typing import Optional, List, Dict, Any
+
+
+def _sanitize_prompt_input(text: str) -> str:
+    """防止 prompt 注入：过滤 XML 标签和指令分隔符"""
+    if not text:
+        return text
+    text = re.sub(r'</?\w+[^>]*>', '', text)
+    text = text.replace('[TOOL_CALL]', '').replace('[/TOOL_CALL]', '')
+    text = text.replace('[SCHEDULE:', '').replace('<system>', '').replace('</system>', '')
+    return text.strip()
 from backend.config import settings
 from backend.logging_config import get_logger
 
@@ -47,17 +57,30 @@ class LLMService:
             logger.warning("No API key configured")
             return None
 
-        url = f"{self.base_url}/chat/completions"
+        url = f"{self.base_url}/v1/messages"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
             "Content-Type": "application/json"
         }
+
+        # Anthropic 协议：system 消息需要独立字段，不能放在 messages 列表中
+        system_parts = []
+        chat_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_parts.append(msg["content"])
+            else:
+                chat_messages.append(msg)
+
         payload = {
             "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
+            "messages": chat_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
         }
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
 
         logger.debug("[%s] Calling LLM...", caller)
         try:
@@ -65,8 +88,30 @@ class LLMService:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                logger.debug("[%s] Raw content: %s", caller, repr(content[:100]))
+                logger.debug("[%s] Raw response keys: %s", caller, list(data.keys()))
+
+                # 尝试 Anthropic 格式: 遍历 content 列表找 type=="text" 的块
+                # MiniMax 会在 content[0] 放 thinking 块，实际文本在后面
+                content = None
+                content_list = data.get("content")
+                if isinstance(content_list, list) and content_list:
+                    for block in content_list:
+                        if isinstance(block, str):
+                            content = block
+                            break
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            content = block.get("text")
+                            break
+                    if content is None:
+                        logger.error("[%s] No text block found in content: %s", caller, str(content_list)[:200])
+                # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
+                elif "choices" in data:
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    logger.error("[%s] Unexpected response structure: %s", caller, str(data)[:300])
+                    return None
+
+                logger.debug("[%s] Raw content: %s", caller, repr(content[:100]) if content else None)
                 cleaned = self._clean_response(content)
                 logger.debug("[%s] Cleaned content: %s, length: %d", caller, repr(cleaned[:100]) if cleaned else None, len(cleaned) if cleaned else 0)
                 return cleaned
@@ -109,7 +154,7 @@ class LLMService:
 
         prompt = welcome_prompts.get(pet_type, welcome_prompts["hot_dog"])
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=1.0, max_tokens=100)
+        result = await self.chat(messages, temperature=1.0, max_tokens=1000)
 
         # 检查返回内容是否合理（欢迎语应该在50字以内）
         # 如果过长或为None，使用fallback
@@ -153,7 +198,7 @@ class LLMService:
 
         messages = [{"role": "user", "content": prompt}]
         # 欢迎语生成：适当增大 max_tokens，避免模型输出被截断为空
-        result = await self.chat(messages, temperature=1.0, max_tokens=200, caller="custom_welcome")
+        result = await self.chat(messages, temperature=1.0, max_tokens=1000, caller="custom_welcome")
 
         # 检查返回内容是否合理（欢迎语应该在 30 字以内）
         if result and len(result) <= 50:
@@ -167,21 +212,23 @@ class LLMService:
 直接输出消息内容，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        return await self.chat(messages, temperature=0.9, max_tokens=150, caller=f"proactive_{pet_type}")
+        return await self.chat(messages, temperature=0.9, max_tokens=1000, caller=f"proactive_{pet_type}")
 
     async def extract_emotion(self, user_message: str, pet_type: str) -> str:
+        user_message = _sanitize_prompt_input(user_message)
         prompt = f"""用户的这条消息：「{user_message}」
 请判断用户的情绪，从以下选项中选择一个：happy（开心）、sad（低落）、anxious（焦虑）、tired（疲惫）、neutral（中性）
 只输出情绪标签，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=0.3, max_tokens=20)
+        result = await self.chat(messages, temperature=0.3, max_tokens=1000)
         valid_emotions = ["happy", "sad", "anxious", "tired", "neutral"]
         if result and result.strip().lower() in valid_emotions:
             return result.strip().lower()
         return "neutral"
 
     async def extract_schedule(self, user_message: str) -> Optional[Dict[str, str]]:
+        user_message = _sanitize_prompt_input(user_message)
         prompt = f"""用户的这条消息：「{user_message}」
 请判断是否包含日程安排（如约定时间、待办事项等）。
 如果有，请用JSON格式输出：{{"content": "日程内容", "scheduled_time": "YYYY-MM-DD HH:MM"}}
@@ -189,7 +236,7 @@ class LLMService:
 直接输出JSON或None，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=0.3, max_tokens=100)
+        result = await self.chat(messages, temperature=0.3, max_tokens=1000)
         logger.debug("extract_schedule raw result: %s", result)
         if result and result.strip() != "None":
             try:
@@ -220,7 +267,7 @@ class LLMService:
 只输出JSON，不要任何解释。"""
 
         messages_list = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages_list, temperature=0.5, max_tokens=300)
+        result = await self.chat(messages_list, temperature=0.5, max_tokens=1500)
 
         if result:
             try:
@@ -262,7 +309,7 @@ class LLMService:
 只输出JSON，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self._call_llm(messages, self.model, 0.3, 150, caller="extract_user_profile")
+        result = await self._call_llm(messages, self.model, 0.3, 1000, caller="extract_user_profile")
         
         logger.debug("extract_user_profile LLM result: %s", result)
         if not result:
