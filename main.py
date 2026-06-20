@@ -24,10 +24,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router
 from backend.routers.custom_pets import router as custom_pets_router
+from backend.routers.visits import router as visits_router
+from backend.routers.learning import router as learning_router
 from backend.auth import AuthMiddleware
 from backend.config import settings
 from backend.logging_config import get_logger
@@ -54,12 +57,14 @@ app = FastAPI(
 )
 
 origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if "*" in origins:
+    logger.warning("CORS_ORIGINS contains wildcard '*' -- all origins are allowed. Set specific domains in production.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-User-Id"],
 )
 
 app.add_middleware(AuthMiddleware)
@@ -82,6 +87,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(sessions_router)
 app.include_router(chat_router)
 app.include_router(custom_pets_router)
+app.include_router(visits_router)
+app.include_router(learning_router)
 
 # 挂载静态文件目录
 frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
@@ -90,12 +97,13 @@ app.mount("/frontend", StaticFiles(directory=frontend_path), name="frontend")
 
 @app.get("/")
 async def root():
-    return {"message": "QAgent Pet API is running", "version": "1.0.0"}
+    return RedirectResponse(url="/frontend/index.html", status_code=307)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "version": "2.0.0"}
+
 
 
 if __name__ == "__main__":
