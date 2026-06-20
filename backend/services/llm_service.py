@@ -2,12 +2,25 @@ import httpx
 import json
 import re
 from typing import Optional, List, Dict, Any
+
+
+def _sanitize_prompt_input(text: str) -> str:
+    """防止 prompt 注入：过滤 XML 标签和指令分隔符"""
+    if not text:
+        return text
+    text = re.sub(r'</?\w+[^>]*>', '', text)
+    text = text.replace('[TOOL_CALL]', '').replace('[/TOOL_CALL]', '')
+    text = text.replace('[SCHEDULE:', '').replace('<system>', '').replace('</system>', '')
+    return text.strip()
 from backend.config import settings
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class LLMService:
     def __init__(self):
-        self.api_key = settings.LLM_API_KEY
+        # 不再在实例中持久化 API Key，每次调用从 settings 读取，减少内存暴露面
         self.base_url = settings.LLM_BASE_URL
         self.model = settings.LLM_MODEL
 
@@ -17,63 +30,100 @@ class LLMService:
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'\[Think\].*?\[/Think\]', '', text, flags=re.DOTALL | re.IGNORECASE)
-        
+
         # 清理内部提示词泄露
         text = re.sub(r'用户的消息是[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'用户要求我扮演.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'You are.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'The user asks[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'So we have a user.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
-        
-        # 清理 JSON 格式的思考内容
-        text = re.sub(r'\{[^{]*?"thought".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'\{[^{]*?"reasoning".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        
+
+        # 清理 JSON 格式的思考内容：仅匹配顶层的 thought/reasoning 键，避免误删普通文本
+        text = re.sub(r'^\s*\{\s*"thought"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'^\s*\{\s*"reasoning"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+
         # 清理多余的空白字符
         text = re.sub(r'\n{3,}', '\n\n', text)
         text = text.strip()
-        
+
         # 如果清理后内容过短或看起来不像正常回复，返回 None
         if len(text) < 3 or text.startswith('LLM response:') or text.startswith('用户'):
             return None
-            
+
         return text
 
-    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown") -> Optional[str]:
-        if not self.api_key:
-            print(f"[LLM][{caller}] No API key configured")
+    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown", timeout: float = 30.0) -> Optional[str]:
+        api_key = settings.LLM_API_KEY
+        if not api_key:
+            logger.warning("No API key configured")
             return None
 
-        url = f"{self.base_url}/chat/completions"
+        url = f"{self.base_url}/v1/messages"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
             "Content-Type": "application/json"
         }
+
+        # Anthropic 协议：system 消息需要独立字段，不能放在 messages 列表中
+        system_parts = []
+        chat_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_parts.append(msg["content"])
+            else:
+                chat_messages.append(msg)
+
         payload = {
             "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
+            "messages": chat_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
         }
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
 
-        print(f"[LLM][{caller}] Calling LLM...")
+        logger.debug("[%s] Calling LLM...", caller)
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
+                logger.debug("[%s] Raw response keys: %s", caller, list(data.keys()))
+
+                # 尝试 Anthropic 格式: 遍历 content 列表找 type=="text" 的块
+                # MiniMax 会在 content[0] 放 thinking 块，实际文本在后面
+                content = None
+                content_list = data.get("content")
+                if isinstance(content_list, list) and content_list:
+                    for block in content_list:
+                        if isinstance(block, str):
+                            content = block
+                            break
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            content = block.get("text")
+                            break
+                    if content is None:
+                        logger.warning("[%s] No text block found in content (token budget likely exhausted): %s", caller, str(content_list)[:200])
+                # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
+                elif "choices" in data:
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    logger.error("[%s] Unexpected response structure: %s", caller, str(data)[:300])
+                    return None
+
+                logger.debug("[%s] Raw content: %s", caller, repr(content[:100]) if content else None)
                 cleaned = self._clean_response(content)
-                print(f"[LLM][{caller}] Success, length: {len(cleaned) if cleaned else 0}")
+                logger.debug("[%s] Cleaned content: %s, length: %d", caller, repr(cleaned[:100]) if cleaned else None, len(cleaned) if cleaned else 0)
                 return cleaned
         except httpx.HTTPStatusError as e:
-            print(f"[LLM][{caller}] HTTP error: {e.response.status_code} - {e.response.text[:200]}")
+            logger.error("[%s] HTTP error: %d - %s", caller, e.response.status_code, e.response.text[:200])
             return None
         except httpx.RequestError as e:
-            print(f"[LLM][{caller}] Request error: {type(e).__name__}: {e}")
+            logger.error("[%s] Request error: %s: %s", caller, type(e).__name__, e)
             return None
         except Exception as e:
-            print(f"[LLM][{caller}] Unexpected error: {type(e).__name__}: {e}")
+            logger.error("[%s] Unexpected error: %s: %s", caller, type(e).__name__, e)
             return None
 
     async def chat(
@@ -81,9 +131,10 @@ class LLMService:
         messages: List[Dict[str, str]],
         temperature: float = 0.8,
         max_tokens: int = 500,
-        caller: str = "chat"
+        caller: str = "chat",
+        timeout: float = 30.0
     ) -> Optional[str]:
-        return await self._call_llm(messages, self.model, temperature, max_tokens, caller=caller)
+        return await self._call_llm(messages, self.model, temperature, max_tokens, caller=caller, timeout=timeout)
 
     async def generate_welcome_message(self, pet_type: str, pet_name: str, pet_personality: str) -> str:
         # 根据宠物类型定制欢迎语 prompt
@@ -105,7 +156,7 @@ class LLMService:
 
         prompt = welcome_prompts.get(pet_type, welcome_prompts["hot_dog"])
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=1.0, max_tokens=100)
+        result = await self.chat(messages, temperature=1.0, max_tokens=1000)
 
         # 检查返回内容是否合理（欢迎语应该在50字以内）
         # 如果过长或为None，使用fallback
@@ -121,6 +172,41 @@ class LLMService:
         }
         return fallbacks.get(pet_type, "你好呀！")
 
+    async def generate_custom_welcome_message(
+        self,
+        pet_name: str,
+        pet_type_display: str,
+        personality_tags: list,
+        catchphrase: str = None
+    ) -> str:
+        """
+        使用 LLM 为自定义宠物生成欢迎语
+        返回生成的欢迎语，失败时返回空字符串（调用方处理 fallback）
+        """
+        tags_str = "、".join(personality_tags) if personality_tags else "未知"
+        prompt = (
+            f"你叫{pet_name}，是一只{pet_type_display}，性格{tags_str}。"
+        )
+        if catchphrase:
+            prompt += f"你的口头禅是\"{catchphrase}\"。"
+        prompt += (
+            "\n主人离开了一段时间后终于回来了，请用你的风格写一句欢迎主人的话。"
+            "\n要求："
+            "\n1. 要体现出你等了主人很久、很想念主人的含义"
+            "\n2. 用词要符合你的宠物类型和性格特点（例如：猫用喵，狗用汪，傲娇要嘴硬心软）"
+            "\n3. 每次说法要自然多样，不要千篇一律"
+            "\n4. 30字以内，直接输出欢迎语，不要任何解释。"
+        )
+
+        messages = [{"role": "user", "content": prompt}]
+        # 欢迎语生成：适当增大 max_tokens，避免模型输出被截断为空
+        result = await self.chat(messages, temperature=1.0, max_tokens=1000, caller="custom_welcome")
+
+        # 检查返回内容是否合理（欢迎语应该在 30 字以内）
+        if result and len(result) <= 50:
+            return result
+        return ""
+
     async def generate_proactive_message(self, pet_type: str, pet_name: str, reason: str) -> Optional[str]:
         prompt = f"""你是 {pet_name}。
 原因：{reason}
@@ -128,21 +214,23 @@ class LLMService:
 直接输出消息内容，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        return await self.chat(messages, temperature=0.9, max_tokens=150, caller=f"proactive_{pet_type}")
+        return await self.chat(messages, temperature=0.9, max_tokens=1000, caller=f"proactive_{pet_type}")
 
     async def extract_emotion(self, user_message: str, pet_type: str) -> str:
+        user_message = _sanitize_prompt_input(user_message)
         prompt = f"""用户的这条消息：「{user_message}」
 请判断用户的情绪，从以下选项中选择一个：happy（开心）、sad（低落）、anxious（焦虑）、tired（疲惫）、neutral（中性）
 只输出情绪标签，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=0.3, max_tokens=20)
+        result = await self.chat(messages, temperature=0.3, max_tokens=1000)
         valid_emotions = ["happy", "sad", "anxious", "tired", "neutral"]
         if result and result.strip().lower() in valid_emotions:
             return result.strip().lower()
         return "neutral"
 
     async def extract_schedule(self, user_message: str) -> Optional[Dict[str, str]]:
+        user_message = _sanitize_prompt_input(user_message)
         prompt = f"""用户的这条消息：「{user_message}」
 请判断是否包含日程安排（如约定时间、待办事项等）。
 如果有，请用JSON格式输出：{{"content": "日程内容", "scheduled_time": "YYYY-MM-DD HH:MM"}}
@@ -150,17 +238,17 @@ class LLMService:
 直接输出JSON或None，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages, temperature=0.3, max_tokens=100)
-        print(f"[DEBUG] extract_schedule raw result: {result}")  # 添加日志
+        result = await self.chat(messages, temperature=0.3, max_tokens=1000)
+        logger.debug("extract_schedule raw result: %s", result)
         if result and result.strip() != "None":
             try:
                 schedule = json.loads(result)
-                print(f"[DEBUG] Schedule extracted: {schedule}")  # 添加日志
+                logger.debug("Schedule extracted: %s", schedule)
                 return schedule
             except Exception as e:
-                print(f"[DEBUG] Schedule parse failed: {e}")  # 添加日志
+                logger.warning("Schedule parse failed: %s", e)
                 return None
-        print("[DEBUG] No schedule in message")
+        logger.debug("No schedule in message")
         return None
 
     async def compress_memory(self, messages: List[Dict[str, str]], pet_name: str) -> Dict[str, Any]:
@@ -181,7 +269,7 @@ class LLMService:
 只输出JSON，不要任何解释。"""
 
         messages_list = [{"role": "user", "content": prompt}]
-        result = await self.chat(messages_list, temperature=0.5, max_tokens=300)
+        result = await self.chat(messages_list, temperature=0.5, max_tokens=1500)
 
         if result:
             try:
@@ -223,9 +311,9 @@ class LLMService:
 只输出JSON，不要任何解释。"""
 
         messages = [{"role": "user", "content": prompt}]
-        result = await self._call_llm(messages, self.model, 0.3, 150, caller="extract_user_profile")
+        result = await self._call_llm(messages, self.model, 0.3, 1000, caller="extract_user_profile")
         
-        print(f"[DEBUG] extract_user_profile LLM result: {result}")
+        logger.debug("extract_user_profile LLM result: %s", result)
         if not result:
             return None
         
@@ -250,10 +338,10 @@ class LLMService:
             # 检查是否有任何非null的字段
             has_data = any(v for k, v in profile_data.items() if v is not None and v != "null" and v != "")
             if has_data:
-                print(f"[DEBUG] User profile extracted: {profile_data}")
+                logger.debug("User profile extracted: %s", profile_data)
                 return profile_data
         except (json.JSONDecodeError, Exception) as e:
-            print(f"[DEBUG] User profile parse failed: {e}, result was: {result[:200]}")
+            logger.warning("User profile parse failed: %s, result was: %s", e, result[:200] if result else "None")
         
         return None
 

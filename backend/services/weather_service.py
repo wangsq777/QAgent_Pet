@@ -3,6 +3,9 @@
 """
 import httpx
 from typing import Optional, Dict, Any
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # WMO 天气代码转中文描述
@@ -76,11 +79,11 @@ class WeatherService:
                         "country": result.get("country", ""),
                         "timezone": result.get("timezone", "Asia/Shanghai")
                     }
-                print(f"[Weather] 未找到城市: {city_name}")
+                logger.warning("未找到城市: %s", city_name)
                 return None
 
         except Exception as e:
-            print(f"[Weather] 获取坐标失败: {e}")
+            logger.warning("获取坐标失败: %s", e)
             return None
 
     async def get_weather(self, location: str) -> Optional[Dict[str, Any]]:
@@ -129,13 +132,13 @@ class WeatherService:
                 }
 
         except httpx.TimeoutException:
-            print("[Weather] 请求超时")
+            logger.warning("请求超时")
             return None
         except httpx.HTTPStatusError as e:
-            print(f"[Weather] HTTP错误: {e}")
+            logger.error("HTTP错误: %s", e)
             return None
         except Exception as e:
-            print(f"[Weather] 未知错误: {e}")
+            logger.error("未知错误: %s", e)
             return None
 
     def _get_wind_direction(self, degrees: int) -> str:

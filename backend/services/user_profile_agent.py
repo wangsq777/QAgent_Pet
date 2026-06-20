@@ -4,6 +4,9 @@
 """
 from typing import Optional, Dict, Any
 from backend.services.llm_service import llm_service
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class UserProfileAgent:
@@ -24,11 +27,10 @@ class UserProfileAgent:
 4. 职业/专业：用户的具体职业或学科专业
 5. 性格特征：从对话中推断用户的性格倾向，如内向、幽默、健谈等
 6. 活跃时段：用户常在线的时间段
-7. 情绪倾向：用户的情绪模式，如容易焦虑、乐观开朗等
-8. 其他信息：用户的习惯、偏好、特殊情况等
+7. 其他信息：用户的习惯、偏好、特殊情况等
 
 请用JSON格式输出：
-{{"region": "城市或地区", "identity": "身份标签", "interests": "兴趣爱好", "occupation": "职业或专业", "personality_hint": "性格特征", "active_hours": "活跃时段", "mood_tendency": "情绪倾向", "extra_info": "其他重要信息"}}
+{{"region": "城市或地区", "identity": "身份标签", "interests": "兴趣爱好", "occupation": "职业或专业", "personality_hint": "性格特征", "active_hours": "活跃时段", "extra_info": "其他重要信息"}}
 如果某项完全无法确定，设为null。
 只输出JSON，不要任何解释。"""
 
@@ -44,7 +46,7 @@ class UserProfileAgent:
             提取到的用户画像信息，如果没有提取到任何信息返回 None
         """
         if not conversation_history or len(conversation_history.strip()) < 10:
-            print("[UserProfileAgent] 对话历史太短，跳过提取")
+            logger.debug("对话历史太短，跳过提取")
             return None
         
         prompt = self.PROFILE_EXTRACT_PROMPT.format(
@@ -53,14 +55,14 @@ class UserProfileAgent:
         
         messages = [{"role": "user", "content": prompt}]
         result = await llm_service._call_llm(
-            messages, 
-            llm_service.model, 
-            temperature=0.3, 
-            max_tokens=300,
+            messages,
+            llm_service.model,
+            temperature=0.3,
+            max_tokens=2000,
             caller="user_profile_agent"
         )
         
-        print(f"[UserProfileAgent] LLM result: {result}")
+        logger.debug("LLM result: %s", result)
         
         if not result:
             return None
@@ -89,14 +91,14 @@ class UserProfileAgent:
             )
             
             if has_data:
-                print(f"[UserProfileAgent] 提取到用户画像: {profile_data}")
+                logger.debug("提取到用户画像: %s", profile_data)
                 return profile_data
             else:
-                print("[UserProfileAgent] 未提取到有效信息")
+                logger.debug("未提取到有效信息")
                 return None
                 
         except (json.JSONDecodeError, Exception) as e:
-            print(f"[UserProfileAgent] JSON解析失败: {e}, result: {result[:200] if result else 'None'}")
+            logger.warning("JSON解析失败: %s, result: %s", e, result[:200] if result else "None")
             return None
 
 

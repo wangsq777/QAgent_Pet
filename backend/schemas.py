@@ -1,17 +1,17 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
 
 class UserCreateRequest(BaseModel):
-    user_id: str
-    nickname: Optional[str] = None
+    user_id: str = Field(..., min_length=1, max_length=100)
+    nickname: Optional[str] = Field(None, max_length=20)
 
 
 class SessionCreateRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(..., min_length=1, max_length=100)
     pet_type: str
-    nickname: Optional[str] = None
+    nickname: Optional[str] = Field(None, max_length=20)
     custom_pet_id: Optional[str] = None  # 自定义宠物ID
 
 
@@ -24,7 +24,7 @@ class SessionResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    content: str
+    content: str = Field(..., min_length=1, max_length=2000)
 
 
 class ChatResponse(BaseModel):
@@ -79,14 +79,14 @@ class UserProfileResponse(BaseModel):
 
 
 class UserProfileUpdateRequest(BaseModel):
-    region: Optional[str] = None
-    identity: Optional[str] = None
-    interests: Optional[str] = None
-    occupation: Optional[str] = None
-    personality_hint: Optional[str] = None
-    active_hours: Optional[str] = None
-    mood_tendency: Optional[str] = None
-    extra_info: Optional[str] = None
+    region: Optional[str] = Field(None, max_length=100)
+    identity: Optional[str] = Field(None, max_length=50)
+    interests: Optional[str] = Field(None, max_length=500)
+    occupation: Optional[str] = Field(None, max_length=100)
+    personality_hint: Optional[str] = Field(None, max_length=100)
+    active_hours: Optional[str] = Field(None, max_length=100)
+    mood_tendency: Optional[str] = Field(None, max_length=100)
+    extra_info: Optional[str] = Field(None, max_length=500)
 
 
 class ErrorResponse(BaseModel):
@@ -98,21 +98,21 @@ class ErrorResponse(BaseModel):
 
 class CustomPetConfigRequest(BaseModel):
     """自定义宠物配置请求"""
-    pet_name: str  # 宠物名称
+    pet_name: str = Field(..., min_length=1, max_length=8)
     pet_type: str  # 宠物类型: dog/cat/hamster/panda/tiger/lion/snake/cheetah/deer/lamb/pig/horse等
     personality_tags: List[str]  # 性格标签列表
-    catchphrase: Optional[str] = None  # 口头禅（选填）
-    special_habits: Optional[str] = None  # 特殊习惯（选填）
+    catchphrase: Optional[str] = Field(None, max_length=20)
+    special_habits: Optional[str] = Field(None, max_length=200)
     avatar_url: Optional[str] = None  # 自定义头像URL（base64）
 
 
 class CustomPetPreviewRequest(BaseModel):
     """自定义宠物预览请求"""
-    pet_name: str
+    pet_name: str = Field(..., min_length=1, max_length=8)
     pet_type: str
     personality_tags: List[str]
-    catchphrase: Optional[str] = None
-    special_habits: Optional[str] = None
+    catchphrase: Optional[str] = Field(None, max_length=20)
+    special_habits: Optional[str] = Field(None, max_length=200)
 
 
 class CustomPetPreviewResponse(BaseModel):
@@ -128,11 +128,11 @@ class CustomPetPreviewResponse(BaseModel):
 
 class CustomPetCreateRequest(BaseModel):
     """创建自定义宠物请求"""
-    pet_name: str
+    pet_name: str = Field(..., min_length=1, max_length=8)
     pet_type: str
     personality_tags: List[str]
-    catchphrase: Optional[str] = None
-    special_habits: Optional[str] = None
+    catchphrase: Optional[str] = Field(None, max_length=20)
+    special_habits: Optional[str] = Field(None, max_length=200)
     avatar_url: Optional[str] = None
 
 

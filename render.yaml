@@ -25,3 +25,7 @@ services:
         value: "sqlite+aiosqlite:///./qagent_pet.db"
       - key: PORT
         value: "10000"
+      - key: CORS_ORIGINS
+        value: "https://your-frontend.onrender.com"  # 生产环境替换为实际前端域名
+      - key: API_KEY
+        sync: false  # 生产环境必须在 Render Dashboard 中设置为强密码

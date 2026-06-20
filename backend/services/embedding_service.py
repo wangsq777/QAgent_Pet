@@ -8,23 +8,33 @@ import numpy as np
 
 from backend.config import settings
 from backend.database import get_db
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class EmbeddingService:
     def __init__(self):
-        self.api_url = settings.EMBEDDING_API_URL or f"{settings.LLM_BASE_URL}/embeddings"
-        self.api_key = settings.EMBEDDING_API_KEY or settings.LLM_API_KEY
         self.model = settings.EMBEDDING_MODEL
+
+    def _get_api_url(self) -> str:
+        return settings.EMBEDDING_API_URL or f"{settings.LLM_BASE_URL}/embeddings"
+
+    def _get_api_key(self) -> str:
+        # 不再在实例中持久化 API Key，每次调用时从 settings 读取
+        return settings.EMBEDDING_API_KEY or settings.LLM_API_KEY
 
     async def embed(self, text: str) -> Optional[List[float]]:
         """调用云端 Embedding API 获取文本向量"""
-        if not self.api_key or not text or not text.strip():
+        api_key = self._get_api_key()
+        if not api_key or not text or not text.strip():
             return None
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        api_url = self._get_api_url()
         payload = {
             "model": self.model,
             "input": text.strip()[:2000]
@@ -32,13 +42,13 @@ class EmbeddingService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(self.api_url, headers=headers, json=payload)
+                response = await client.post(api_url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
                 embedding = data["data"][0]["embedding"]
                 return embedding
         except Exception as e:
-            print(f"[EmbeddingService] embed failed: {e}")
+            logger.warning("embed failed: %s", e)
             return None
 
     @staticmethod
@@ -91,12 +101,12 @@ class EmbeddingService:
         async with get_db() as db:
             if source_type:
                 cursor = await db.execute(
-                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? AND source_type = ?",
+                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? AND source_type = ? ORDER BY created_at DESC LIMIT 500",
                     (session_id, source_type)
                 )
             else:
                 cursor = await db.execute(
-                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ?",
+                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? ORDER BY created_at DESC LIMIT 500",
                     (session_id,)
                 )
             rows = await cursor.fetchall()

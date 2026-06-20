@@ -3,10 +3,30 @@
 根据用户配置生成宠物的 System Prompt
 """
 
+import re
 from typing import List, Optional, Dict, Any
 from .hot_dog import SYSTEM_PROMPT as HOT_DOG_PROMPT, CATCH_PHRASE as HOT_DOG_CATCH
 from .cold_cat import SYSTEM_PROMPT as COLD_CAT_PROMPT, CATCH_PHRASE as COLD_CAT_CATCH
 from .mouse import SYSTEM_PROMPT as MOUSE_PROMPT, CATCH_PHRASE as MOUSE_CATCH
+from backend.services.llm_service import llm_service
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+def _sanitize_user_input(text: str) -> str:
+    """过滤用户输入中的指令分隔符，防止 prompt 注入"""
+    if not text:
+        return text
+    # 移除 XML 标签
+    text = re.sub(r'</?\w+[^>]*>', '', text)
+    # 移除工具调用标记
+    text = text.replace('[TOOL_CALL]', '').replace('[/TOOL_CALL]', '')
+    text = text.replace('[SCHEDULE:', '').replace('<system>', '').replace('</system>', '')
+    text = text.replace('<long_term_memory>', '').replace('</long_term_memory>', '')
+    text = text.replace('<user_profile>', '').replace('</user_profile>', '')
+    text = text.replace('<current_message>', '').replace('</current_message>', '')
+    return text.strip()
 
 
 # 宠物类型对应的自称
@@ -27,6 +47,26 @@ PET_SELF_NAMES = {
     "lamb": "咩咩",
     "pig": "哼哼",
     "horse": "哒哒"
+}
+
+# 宠物类型对应的问候开场白
+PET_TYPE_GREETINGS = {
+    "dog": "汪",
+    "cat": "喵",
+    "hamster": "吱吱",
+    "rabbit": "蹦",
+    "bird": "叽叽",
+    "fox": "呜",
+    "bear": "嗷",
+    "panda": "嗯嗯",
+    "tiger": "嗷呜",
+    "lion": "吼",
+    "snake": "嘶",
+    "cheetah": "喵",
+    "deer": "呦",
+    "lamb": "咩",
+    "pig": "哼哼",
+    "horse": "嘶"
 }
 
 # 宠物类型对应的背景描述模板
@@ -194,7 +234,7 @@ def build_background_info(pet_type: str, personality_tags: List[str], special_ha
     
     # 特殊习惯
     if special_habits:
-        lines.append(f"你的特殊习惯：{special_habits}")
+        lines.append(f"你的特殊习惯：{_sanitize_user_input(special_habits)}")
     
     return "\n- ".join(lines)
 
@@ -282,8 +322,13 @@ def generate_custom_pet_system_prompt(
     Returns:
         完整的 System Prompt
     """
+    # 过滤用户输入字段，防止 prompt 注入
+    pet_name = _sanitize_user_input(pet_name)
+    if catchphrase:
+        catchphrase = _sanitize_user_input(catchphrase)
+
     self_name = PET_SELF_NAMES.get(pet_type, "我")
-    
+
     # 如果没有提供口头禅，根据性格生成默认
     if not catchphrase:
         if "热情" in personality_tags or "活泼" in personality_tags:
@@ -356,53 +401,64 @@ def generate_custom_pet_system_prompt(
     return system_prompt
 
 
-def generate_welcome_messages(
+# 宠物类型中文显示名映射（用于 LLM 欢迎语生成）
+PET_TYPE_DISPLAY_NAMES = {
+    "dog": "小狗", "cat": "小猫", "rabbit": "小兔", "bird": "小鸟",
+    "hamster": "小仓鼠", "fox": "小狐狸", "bear": "小熊", "panda": "小熊猫",
+    "tiger": "小老虎", "lion": "小狮子", "snake": "小蛇", "cheetah": "小猎豹",
+    "deer": "小鹿", "lamb": "小羊", "pig": "小猪", "horse": "小马"
+}
+
+
+async def generate_welcome_messages(
     pet_name: str,
     pet_type: str,
     personality_tags: List[str],
     catchphrase: Optional[str] = None
 ) -> List[str]:
-    """生成欢迎语列表"""
+    """
+    生成欢迎语列表
+    调用 LLM 2 次生成 2 条不同的欢迎语，均失败时回退到通用模板。
+    """
+    import asyncio
+
+    pet_type_display = PET_TYPE_DISPLAY_NAMES.get(pet_type, "可爱小动物")
+
+    async def _generate_one(attempt: int) -> Optional[str]:
+        """生成单条欢迎语，失败返回 None"""
+        try:
+            logger.debug("LLM 生成欢迎语 #%d: pet_name=%s, pet_type=%s(%s), personality=%s, catchphrase=%s",
+                         attempt, pet_name, pet_type, pet_type_display, personality_tags, catchphrase)
+            result = await llm_service.generate_custom_welcome_message(
+                pet_name=pet_name,
+                pet_type_display=pet_type_display,
+                personality_tags=personality_tags,
+                catchphrase=catchphrase
+            )
+            logger.debug("LLM #%d 返回: %s", attempt, repr(result))
+            return result if result else None
+        except Exception as e:
+            logger.warning("LLM #%d 失败: %s", attempt, e)
+            return None
+
+    # 并发调用 2 次，每次生成不同的欢迎语
+    results = await asyncio.gather(_generate_one(1), _generate_one(2))
+    welcomes = [r for r in results if r]
+
+    if welcomes:
+        logger.info("LLM 成功生成 %d 条欢迎语", len(welcomes))
+        return welcomes
+
+    # --- Fallback: LLM 完全不可用时使用通用模板 ---
+    logger.warning("LLM 全部失败，使用 fallback 模板")
     self_name = PET_SELF_NAMES.get(pet_type, "我")
-    
-    if not catchphrase:
-        catchphrase = "你好呀"
-    
-    # 根据性格生成不同的欢迎语
-    welcomes = []
-    
-    if "热情" in personality_tags or "活泼" in personality_tags:
-        welcomes = [
-            f"汪！主人！我等你好久啦！",
-            f"哇！主人来啦！好开心！",
-            f"{self_name}超级想你的！"
-        ]
-    elif "高冷" in personality_tags or "傲娇" in personality_tags:
-        welcomes = [
-            "哼...你来了啊。",
-            "......随便你。",
-            "哦。坐吧。"
-        ]
-    elif "胆小" in personality_tags:
-        welcomes = [
-            f"{self_name}...见到主人了...",
-            f"主人...{self_name}等你很久了...",
-            f"啊！主、主人好！{self_name}很高兴..."
-        ]
-    elif "温柔" in personality_tags:
-        welcomes = [
-            f"主人，欢迎回来...{self_name}一直在等你。",
-            f"你好呀，主人...{self_name}想你了。",
-            f"主人...{self_name}很高兴见到你。"
-        ]
-    else:
-        welcomes = [
-            f"你好呀，主人！",
-            f"欢迎回来，主人！",
-            f"嗨！{self_name}等你很久了！"
-        ]
-    
-    return welcomes
+    greeting = PET_TYPE_GREETINGS.get(pet_type, "嗨")
+
+    return [
+        f"{greeting}！主人，{self_name}等你好久啦！",
+        f"主人回来啦！{self_name}一直在等你呢。",
+        f"{greeting}~{self_name}盼了你好久，终于见到主人了！"
+    ]
 
 
 # 预定义宠物的提示词映射（用于兼容现有代码）

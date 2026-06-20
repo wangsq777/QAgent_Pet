@@ -4,6 +4,9 @@ IP地理位置服务 - 自动获取用户所在地区
 import httpx
 from typing import Optional
 import os
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class IPLocationService:
@@ -56,7 +59,7 @@ class IPLocationService:
                         return location
                         
         except Exception as e:
-            print(f"[IP Location] 获取位置失败: {e}")
+            logger.warning("获取位置失败: %s", e)
         
         return None
     
