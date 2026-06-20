@@ -42,3 +42,11 @@ llm_debug.log
 # OS
 .DS_Store
 Thumbs.db
+
+# AI/Agent workspace caches
+.agents/
+.claude/worktrees/
+.workbuddy/
+AGENTS.md
+CLAUDE.md
+
