@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>陪我学 · 开源项目导读 - QAgent Pet</title>
+    <link rel="stylesheet" href="css/learn.css?v=1">
+</head>
+<body>
+    <div class="learn-container">
+        <!-- 顶部栏 -->
+        <header class="learn-topbar">
+            <button id="back-btn" class="topbar-btn ghost">← 返回</button>
+            <div class="topbar-title">
+                <span id="learn-repo-name" class="repo-name">陪我学</span>
+                <span id="learn-chapter-progress" class="chapter-progress" style="display:none;">第 1 / 1 章</span>
+            </div>
+            <button id="pause-btn" class="topbar-btn danger" style="display:none;">暂停学习</button>
+        </header>
+
+        <div class="learn-body">
+            <!-- 左侧宠物陪学区 -->
+            <aside class="pet-companion">
+                <div class="companion-avatar" id="companion-avatar">
+                    <span class="companion-emoji" id="companion-emoji">🐾</span>
+                </div>
+                <h3 id="companion-name" class="companion-name">我的宠物</h3>
+                <span id="companion-type" class="companion-type">陪学伙伴</span>
+                <div class="companion-status" id="companion-status">准备陪你一起学习～</div>
+                <div class="companion-comment" id="companion-comment">
+                    <div class="comment-label">最近旁白</div>
+                    <div class="comment-text" id="companion-comment-text">还没开始学习哦</div>
+                </div>
+            </aside>
+
+            <!-- 中央教学区 -->
+            <main class="teach-area">
+                <!-- 状态1：GitHub 链接输入 -->
+                <section id="state-input" class="teach-card state-card">
+                    <div class="state-icon">📚</div>
+                    <h2>输入一个公开的 GitHub 项目</h2>
+                    <p class="state-desc">你的宠物会作为陪学伙伴，源码导读老师会带你分章节读懂这个项目。</p>
+                    <div class="input-row">
+                        <input id="github-url-input" type="url" class="text-input"
+                               placeholder="https://github.com/owner/repo" maxlength="500">
+                        <button id="analyze-btn" class="primary-btn">分析项目</button>
+                    </div>
+                    <p class="input-hint">仅支持 github.com 公开仓库，暂不支持私有仓库和 Token。</p>
+                </section>
+
+                <!-- 状态2：分析中 -->
+                <section id="state-analyzing" class="teach-card state-card" style="display:none;">
+                    <div class="loading-dots"><span></span><span></span><span></span></div>
+                    <h2>正在分析项目并生成学习大纲...</h2>
+                    <p class="state-desc">读取 README、目录树和关键文件，这需要一点时间。</p>
+                </section>
+
+                <!-- 状态3：大纲确认 -->
+                <section id="state-outline" class="teach-card state-card" style="display:none;">
+                    <div class="state-icon">🗂️</div>
+                    <h2 id="outline-title">学习大纲</h2>
+                    <p class="state-desc" id="outline-summary"></p>
+                    <div id="outline-list" class="outline-list"></div>
+                    <div class="outline-actions">
+                        <button id="start-learn-btn" class="primary-btn">开始学习</button>
+                        <button id="regenerate-btn" class="ghost-btn">重新生成</button>
+                    </div>
+                </section>
+
+                <!-- 状态4：章节教学 -->
+                <section id="state-teach" class="teach-card teach-content-area" style="display:none;">
+                    <div class="chapter-head">
+                        <h2 id="chapter-title">章节标题</h2>
+                        <span id="chapter-goal" class="chapter-goal"></span>
+                    </div>
+                    <div id="teacher-content" class="teacher-content"></div>
+
+                    <div id="chapter-pet-comment" class="chapter-pet-comment" style="display:none;">
+                        <span class="comment-label">🐾 陪你学的宠物说：</span>
+                        <div id="chapter-pet-comment-text" class="comment-text"></div>
+                    </div>
+
+                    <div id="qa-area" class="qa-area">
+                        <h4>本章问答</h4>
+                        <div id="qa-list" class="qa-list"></div>
+                    </div>
+
+                    <div class="chapter-actions">
+                        <button id="pet-explain-btn" class="ghost-btn">让宠物解释一下</button>
+                        <button id="next-chapter-btn" class="primary-btn">完成本章，下一章</button>
+                    </div>
+                </section>
+
+                <!-- 状态5：学习完成 -->
+                <section id="state-complete" class="teach-card state-card" style="display:none;">
+                    <div class="state-icon">🎉</div>
+                    <h2>学习完成！</h2>
+                    <p class="state-desc" id="complete-desc">恭喜你读完了整个项目。</p>
+                    <div class="complete-actions">
+                        <button id="back-chat-btn" class="primary-btn">返回聊天</button>
+                        <button id="restart-btn" class="ghost-btn">再学一个项目</button>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- 底部操作区 -->
+        <footer class="learn-footer" id="learn-footer" style="display:none;">
+            <input id="question-input" type="text" class="footer-input"
+                   placeholder="向老师提问当前章节的问题..." maxlength="1000">
+            <div class="footer-actions">
+                <button id="ask-teacher-btn" class="primary-btn small">问老师</button>
+                <button id="ask-pet-btn" class="ghost-btn small">问宠物</button>
+            </div>
+        </footer>
+    </div>
+
+    <div id="loading" class="loading-overlay" style="display:none;">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <script src="js/api.js?v=2"></script>
+    <script src="js/learn.js?v=1"></script>
+</body>
+</html>

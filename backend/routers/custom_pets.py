@@ -9,8 +9,10 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from backend.database import get_db
 from backend.schemas import (
@@ -30,6 +32,7 @@ from backend.prompts.custom_pet import (
 )
 
 router = APIRouter(prefix="/api/custom-pets", tags=["自定义宠物"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ============ 辅助函数 ============
@@ -96,11 +99,12 @@ def _row_to_pet_response(row) -> CustomPetResponse:
 # ============ API 接口 ============
 
 @router.get("/templates", response_model=PetTemplateListResponse)
-async def get_pet_templates():
+@limiter.limit("60/minute")
+async def get_pet_templates(request: Request):
     """
     获取所有可选的宠物模板（预置 + 用户自定义）
     """
-    user_id = "default_user"
+    user_id = request.state.user_id
     presets = []
     for pet_type, preset in PRESET_PROMPTS.items():
         presets.append(PetTemplateResponse(
@@ -130,49 +134,51 @@ async def get_pet_templates():
 
 
 @router.post("/preview", response_model=CustomPetPreviewResponse)
-async def preview_custom_pet(request: CustomPetPreviewRequest):
+@limiter.limit("30/minute")
+async def preview_custom_pet(body: CustomPetPreviewRequest, request: Request):
     """
     预览自定义宠物配置
     根据用户配置生成完整的 System Prompt，支持用户确认或修改
     """
-    is_valid, error = validate_pet_config(request)
+    is_valid, error = validate_pet_config(body)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error)
 
     system_prompt = generate_custom_pet_system_prompt(
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
-        catchphrase=request.catchphrase,
-        special_habits=request.special_habits
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
+        catchphrase=body.catchphrase,
+        special_habits=body.special_habits
     )
 
     welcome_messages = await generate_welcome_messages(
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
-        catchphrase=request.catchphrase
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
+        catchphrase=body.catchphrase
     )
 
     return CustomPetPreviewResponse(
         system_prompt=system_prompt,
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
-        catchphrase=request.catchphrase or "",
-        special_habits=request.special_habits,
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
+        catchphrase=body.catchphrase or "",
+        special_habits=body.special_habits,
         welcome_messages=welcome_messages
     )
 
 
 @router.post("", response_model=CustomPetResponse, status_code=201)
-async def create_custom_pet(request: CustomPetCreateRequest):
+@limiter.limit("10/minute")
+async def create_custom_pet(body: CustomPetCreateRequest, request: Request):
     """
     创建自定义宠物
     保存用户自定义宠物的完整配置到数据库
     """
-    user_id = "default_user"
-    is_valid, error = validate_pet_config(request)
+    user_id = request.state.user_id
+    is_valid, error = validate_pet_config(body)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error)
 
@@ -180,35 +186,35 @@ async def create_custom_pet(request: CustomPetCreateRequest):
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT pet_id FROM custom_pets WHERE user_id = ? AND pet_name = ?",
-            (user_id, request.pet_name)
+            (user_id, body.pet_name)
         )
         if await cursor.fetchone():
             raise HTTPException(
                 status_code=400,
-                detail=f"宠物名称「{request.pet_name}」已被使用，请更换名称"
+                detail=f"宠物名称「{body.pet_name}」已被使用，请更换名称"
             )
 
     pet_id = f"custom_{uuid.uuid4().hex[:8]}"
 
     system_prompt = generate_custom_pet_system_prompt(
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
-        catchphrase=request.catchphrase,
-        special_habits=request.special_habits
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
+        catchphrase=body.catchphrase,
+        special_habits=body.special_habits
     )
 
     # 生成口头禅（如果未提供）
-    catchphrase = request.catchphrase
+    catchphrase = body.catchphrase
     if not catchphrase:
-        if "热情" in request.personality_tags or "活泼" in request.personality_tags:
-            catchphrase = f"你好呀，我是{request.pet_name}！"
-        elif "高冷" in request.personality_tags or "傲娇" in request.personality_tags:
+        if "热情" in body.personality_tags or "活泼" in body.personality_tags:
+            catchphrase = f"你好呀，我是{body.pet_name}！"
+        elif "高冷" in body.personality_tags or "傲娇" in body.personality_tags:
             catchphrase = "哼...才不是关心你。"
-        elif "胆小" in request.personality_tags:
-            catchphrase = f"{request.pet_name}我啊..."
+        elif "胆小" in body.personality_tags:
+            catchphrase = f"{body.pet_name}我啊..."
         else:
-            catchphrase = f"我是{request.pet_name}！"
+            catchphrase = f"我是{body.pet_name}！"
 
     now = datetime.now()
 
@@ -218,28 +224,29 @@ async def create_custom_pet(request: CustomPetCreateRequest):
                (pet_id, user_id, pet_name, pet_type, personality_tags, catchphrase, 
                 special_habits, avatar_url, system_prompt, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (pet_id, user_id, request.pet_name, request.pet_type,
-             json.dumps(request.personality_tags, ensure_ascii=False),
-             catchphrase, request.special_habits or "",
-             request.avatar_url or "", system_prompt, now, now)
+            (pet_id, user_id, body.pet_name, body.pet_type,
+             json.dumps(body.personality_tags, ensure_ascii=False),
+             catchphrase, body.special_habits or "",
+             body.avatar_url or "", system_prompt, now, now)
         )
         await db.commit()
 
     return CustomPetResponse(
         pet_id=pet_id,
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
         catchphrase=catchphrase,
-        special_habits=request.special_habits,
-        avatar_url=request.avatar_url,
+        special_habits=body.special_habits,
+        avatar_url=body.avatar_url,
         system_prompt=system_prompt,
         created_at=now
     )
 
 
 @router.get("/detail/{pet_id}", response_model=CustomPetResponse)
-async def get_custom_pet(pet_id: str):
+@limiter.limit("60/minute")
+async def get_custom_pet(pet_id: str, request: Request):
     """
     获取自定义宠物详情
     """
@@ -257,11 +264,12 @@ async def get_custom_pet(pet_id: str):
 
 
 @router.put("/detail/{pet_id}", response_model=CustomPetResponse)
-async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
+@limiter.limit("10/minute")
+async def update_custom_pet(pet_id: str, body: CustomPetCreateRequest, request: Request):
     """
     更新自定义宠物配置
     """
-    user_id = "default_user"
+    user_id = request.state.user_id
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM custom_pets WHERE pet_id = ?",
@@ -274,7 +282,7 @@ async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
 
         original = _row_to_pet_response(row)
 
-    is_valid, error = validate_pet_config(request)
+    is_valid, error = validate_pet_config(body)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error)
 
@@ -282,32 +290,32 @@ async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT pet_id FROM custom_pets WHERE user_id = ? AND pet_name = ? AND pet_id != ?",
-            (user_id, request.pet_name, pet_id)
+            (user_id, body.pet_name, pet_id)
         )
         if await cursor.fetchone():
             raise HTTPException(
                 status_code=400,
-                detail=f"宠物名称「{request.pet_name}」已被使用，请更换名称"
+                detail=f"宠物名称「{body.pet_name}」已被使用，请更换名称"
             )
 
     system_prompt = generate_custom_pet_system_prompt(
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
-        catchphrase=request.catchphrase,
-        special_habits=request.special_habits
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
+        catchphrase=body.catchphrase,
+        special_habits=body.special_habits
     )
 
-    catchphrase = request.catchphrase
+    catchphrase = body.catchphrase
     if not catchphrase:
-        if "热情" in request.personality_tags or "活泼" in request.personality_tags:
-            catchphrase = f"你好呀，我是{request.pet_name}！"
-        elif "高冷" in request.personality_tags or "傲娇" in request.personality_tags:
+        if "热情" in body.personality_tags or "活泼" in body.personality_tags:
+            catchphrase = f"你好呀，我是{body.pet_name}！"
+        elif "高冷" in body.personality_tags or "傲娇" in body.personality_tags:
             catchphrase = "哼...才不是关心你。"
-        elif "胆小" in request.personality_tags:
-            catchphrase = f"{request.pet_name}我啊..."
+        elif "胆小" in body.personality_tags:
+            catchphrase = f"{body.pet_name}我啊..."
         else:
-            catchphrase = f"我是{request.pet_name}！"
+            catchphrase = f"我是{body.pet_name}！"
 
     now = datetime.now()
 
@@ -317,28 +325,29 @@ async def update_custom_pet(pet_id: str, request: CustomPetCreateRequest):
                pet_name=?, pet_type=?, personality_tags=?, catchphrase=?,
                special_habits=?, avatar_url=?, system_prompt=?, updated_at=?
                WHERE pet_id=?""",
-            (request.pet_name, request.pet_type,
-             json.dumps(request.personality_tags, ensure_ascii=False),
-             catchphrase, request.special_habits or "",
-             request.avatar_url or "", system_prompt, now, pet_id)
+            (body.pet_name, body.pet_type,
+             json.dumps(body.personality_tags, ensure_ascii=False),
+             catchphrase, body.special_habits or "",
+             body.avatar_url or "", system_prompt, now, pet_id)
         )
         await db.commit()
 
     return CustomPetResponse(
         pet_id=pet_id,
-        pet_name=request.pet_name,
-        pet_type=request.pet_type,
-        personality_tags=request.personality_tags,
+        pet_name=body.pet_name,
+        pet_type=body.pet_type,
+        personality_tags=body.personality_tags,
         catchphrase=catchphrase,
-        special_habits=request.special_habits,
-        avatar_url=request.avatar_url,
+        special_habits=body.special_habits,
+        avatar_url=body.avatar_url,
         system_prompt=system_prompt,
         created_at=original.created_at
     )
 
 
 @router.delete("/detail/{pet_id}")
-async def delete_custom_pet(pet_id: str, user_id: str = "default_user"):
+@limiter.limit("10/minute")
+async def delete_custom_pet(pet_id: str, request: Request):
     """
     删除自定义宠物及所有关联数据
 
@@ -347,6 +356,7 @@ async def delete_custom_pet(pet_id: str, user_id: str = "default_user"):
     - 按 user_id 查询，确保只能删除自己的宠物
     - 级联清理 pet_sessions / messages / long_term_memories / schedules / memory_vectors
     """
+    user_id = request.state.user_id
     if not pet_id.startswith("custom_"):
         raise HTTPException(status_code=403, detail="预置宠物不支持删除")
 
@@ -400,11 +410,12 @@ async def delete_custom_pet(pet_id: str, user_id: str = "default_user"):
 
 
 @router.get("")
-async def list_custom_pets():
+@limiter.limit("60/minute")
+async def list_custom_pets(request: Request):
     """
     列出用户所有自定义宠物
     """
-    user_id = "default_user"
+    user_id = request.state.user_id
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM custom_pets WHERE user_id = ? ORDER BY created_at DESC",

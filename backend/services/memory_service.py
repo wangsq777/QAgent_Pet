@@ -1,4 +1,5 @@
 import uuid
+import re
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from backend.database import get_db
@@ -6,6 +7,27 @@ from backend.schemas import MessageResponse
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# 用户画像允许更新的字段白名单（防止动态 SQL 字段名注入）
+ALLOWED_PROFILE_FIELDS = {
+    "region", "identity", "interests", "occupation",
+    "personality_hint", "active_hours", "mood_tendency", "extra_info"
+}
+
+# 用户画像字段长度上限（防止 LLM 输出撑爆 prompt）
+FIELD_MAX_LEN = {
+    "region": 100,
+    "identity": 50,
+    "interests": 200,
+    "occupation": 100,
+    "personality_hint": 100,
+    "active_hours": 100,
+    "mood_tendency": 50,
+    "extra_info": 500,
+}
+
+# 字段名格式校验（第二道防线）
+FIELD_NAME_PATTERN = re.compile(r'^[a-z_]+$')
 
 
 class MemoryService:
@@ -228,9 +250,20 @@ class MemoryService:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    def _sanitize_profile_value(self, field_name: str, value: Any) -> Optional[str]:
+        """对用户画像字段值做长度截断与空值过滤"""
+        if value is None or value == "" or value == "null":
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        limit = FIELD_MAX_LEN.get(field_name, 200)
+        return text[:limit]
+
     async def merge_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> None:
         """
-        合并用户画像（只更新非空的新值，保留已有值）
+        合并用户画像（只更新非空的新值，保留已有值）。
+        使用单事务 + 字段白名单，防止 SQL 注入与并发覆盖。
         """
         async with get_db() as db:
             existing = await db.execute(
@@ -238,33 +271,29 @@ class MemoryService:
                 (user_id,)
             )
             row = await existing.fetchone()
-            
+
             if row:
-                # 合并：只有新值非空才更新
-                field_map = {
-                    "region": profile_data.get("region"),
-                    "identity": profile_data.get("identity"),
-                    "interests": profile_data.get("interests"),
-                    "occupation": profile_data.get("occupation"),
-                    "personality_hint": profile_data.get("personality_hint"),
-                    "active_hours": profile_data.get("active_hours"),
-                    "mood_tendency": profile_data.get("mood_tendency"),
-                    "extra_info": profile_data.get("extra_info")
-                }
-                
                 update_fields = []
                 update_values = []
-                
-                for field_name, new_value in field_map.items():
-                    if new_value is not None and new_value != "" and new_value != "null":
+
+                for field_name, new_value in profile_data.items():
+                    # 白名单校验
+                    if field_name not in ALLOWED_PROFILE_FIELDS:
+                        logger.warning("忽略非法用户画像字段: %s", field_name)
+                        continue
+                    if not FIELD_NAME_PATTERN.match(field_name):
+                        logger.warning("忽略格式非法的用户画像字段: %s", field_name)
+                        continue
+                    sanitized = self._sanitize_profile_value(field_name, new_value)
+                    if sanitized is not None:
                         update_fields.append(f"{field_name} = ?")
-                        update_values.append(new_value)
-                
+                        update_values.append(sanitized)
+
                 if update_fields:
                     update_fields.append("updated_at = ?")
                     update_values.append(datetime.now())
                     update_values.append(user_id)
-                    
+
                     await db.execute(
                         f"UPDATE user_profiles SET {', '.join(update_fields)} WHERE user_id = ?",
                         update_values
@@ -275,6 +304,10 @@ class MemoryService:
             else:
                 # 创建新记录
                 profile_id = str(uuid.uuid4())
+                insert_values = {
+                    field: self._sanitize_profile_value(field, profile_data.get(field))
+                    for field in ALLOWED_PROFILE_FIELDS
+                }
                 await db.execute(
                     """
                     INSERT INTO user_profiles (profile_id, user_id, region, identity, interests, occupation, personality_hint, active_hours, mood_tendency, extra_info, created_at, updated_at)
@@ -283,20 +316,20 @@ class MemoryService:
                     (
                         profile_id,
                         user_id,
-                        profile_data.get("region"),
-                        profile_data.get("identity"),
-                        profile_data.get("interests"),
-                        profile_data.get("occupation"),
-                        profile_data.get("personality_hint"),
-                        profile_data.get("active_hours"),
-                        profile_data.get("mood_tendency"),
-                        profile_data.get("extra_info"),
+                        insert_values.get("region"),
+                        insert_values.get("identity"),
+                        insert_values.get("interests"),
+                        insert_values.get("occupation"),
+                        insert_values.get("personality_hint"),
+                        insert_values.get("active_hours"),
+                        insert_values.get("mood_tendency"),
+                        insert_values.get("extra_info"),
                         datetime.now(),
                         datetime.now()
                     )
                 )
                 logger.debug("用户画像已创建: %s", profile_data)
-            
+
             await db.commit()
 
     async def save_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> None:

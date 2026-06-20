@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 class LLMService:
     def __init__(self):
-        self.api_key = settings.LLM_API_KEY
+        # 不再在实例中持久化 API Key，每次调用从 settings 读取，减少内存暴露面
         self.base_url = settings.LLM_BASE_URL
         self.model = settings.LLM_MODEL
 
@@ -30,36 +30,37 @@ class LLMService:
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'\[Think\].*?\[/Think\]', '', text, flags=re.DOTALL | re.IGNORECASE)
-        
+
         # 清理内部提示词泄露
         text = re.sub(r'用户的消息是[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'用户要求我扮演.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'You are.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'The user asks[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'So we have a user.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
-        
-        # 清理 JSON 格式的思考内容
-        text = re.sub(r'\{[^{]*?"thought".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'\{[^{]*?"reasoning".*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        
+
+        # 清理 JSON 格式的思考内容：仅匹配顶层的 thought/reasoning 键，避免误删普通文本
+        text = re.sub(r'^\s*\{\s*"thought"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'^\s*\{\s*"reasoning"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+
         # 清理多余的空白字符
         text = re.sub(r'\n{3,}', '\n\n', text)
         text = text.strip()
-        
+
         # 如果清理后内容过短或看起来不像正常回复，返回 None
         if len(text) < 3 or text.startswith('LLM response:') or text.startswith('用户'):
             return None
-            
+
         return text
 
-    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown") -> Optional[str]:
-        if not self.api_key:
+    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown", timeout: float = 30.0) -> Optional[str]:
+        api_key = settings.LLM_API_KEY
+        if not api_key:
             logger.warning("No API key configured")
             return None
 
         url = f"{self.base_url}/v1/messages"
         headers = {
-            "x-api-key": self.api_key,
+            "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json"
         }
@@ -84,7 +85,7 @@ class LLMService:
 
         logger.debug("[%s] Calling LLM...", caller)
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -103,7 +104,7 @@ class LLMService:
                             content = block.get("text")
                             break
                     if content is None:
-                        logger.error("[%s] No text block found in content: %s", caller, str(content_list)[:200])
+                        logger.warning("[%s] No text block found in content (token budget likely exhausted): %s", caller, str(content_list)[:200])
                 # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
                 elif "choices" in data:
                     content = data["choices"][0]["message"]["content"]
@@ -130,9 +131,10 @@ class LLMService:
         messages: List[Dict[str, str]],
         temperature: float = 0.8,
         max_tokens: int = 500,
-        caller: str = "chat"
+        caller: str = "chat",
+        timeout: float = 30.0
     ) -> Optional[str]:
-        return await self._call_llm(messages, self.model, temperature, max_tokens, caller=caller)
+        return await self._call_llm(messages, self.model, temperature, max_tokens, caller=caller, timeout=timeout)
 
     async def generate_welcome_message(self, pet_type: str, pet_name: str, pet_personality: str) -> str:
         # 根据宠物类型定制欢迎语 prompt

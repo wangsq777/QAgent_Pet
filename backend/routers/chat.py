@@ -1,7 +1,11 @@
+import json
 import re
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from backend.database import get_db
 from backend.schemas import ChatRequest, ChatResponse, MessageListResponse
 from backend.services.llm_service import llm_service
@@ -9,12 +13,61 @@ from backend.services.memory_service import memory_service
 from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
+from backend.services.mood_agent import mood_agent
 from backend import prompts
 from backend.services.embedding_service import embedding_service
 from backend.prompts.custom_pet import _sanitize_user_input
 from backend.logging_config import get_logger
 
+limiter = Limiter(key_func=get_remote_address)
+
 logger = get_logger(__name__)
+
+# session_id / visit_id / pet_id 等 UUID 格式校验
+UUID_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
+
+
+def _validate_uuid(value: str, field_name: str = "id") -> None:
+    if not value or not UUID_PATTERN.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
+
+
+def parse_structured_reply(raw: Optional[str]) -> tuple[str, str]:
+    """
+    解析主 LLM 的结构化输出，返回 (reply_text, emotion_tag)。
+    失败时返回 (raw 或空字符串, "neutral")。
+    """
+    if not raw:
+        return "", "neutral"
+
+    valid_emotions = {"happy", "sad", "anxious", "tired", "neutral"}
+    try:
+        data = json.loads(raw)
+        reply = data.get("reply", raw)
+        emotion = data.get("emotion", "neutral").strip().lower()
+        if emotion not in valid_emotions:
+            emotion = "neutral"
+        return reply, emotion
+    except Exception:
+        # 兜底：匹配包含 reply 与 emotion 的 JSON 块，优先取最后一个匹配（更可能是外层结构）
+        matches = re.findall(r'\{.*?"reply".*?"emotion".*?\}', raw, re.DOTALL)
+        for candidate in reversed(matches):
+            try:
+                data = json.loads(candidate)
+                reply = data.get("reply", "")
+                if not reply:
+                    continue
+                emotion = data.get("emotion", "neutral").strip().lower()
+                if emotion not in valid_emotions:
+                    emotion = "neutral"
+                return reply, emotion
+            except Exception:
+                continue
+        return raw, "neutral"
+
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
 
@@ -227,16 +280,16 @@ async def execute_tools_and_build_final_prompt(
     reply: str, 
     original_prompt: str, 
     pet_type: str
-) -> tuple[str, dict]:
+) -> tuple[str, dict, str]:
     """
     解析并执行 LLM 返回的工具调用，然后将工具结果反馈给 LLM 生成最终回复
-    
-    返回: (最终回复, 工具结果字典)
+
+    返回: (最终回复, 工具结果字典, 情绪标签)
     """
     tool_calls = tool_executor.parse_tool_calls(reply)
-    
+
     if not tool_calls:
-        return reply, {}
+        return reply, {}, "neutral"
     
     # 执行所有工具调用
     tool_results = {}
@@ -269,16 +322,20 @@ async def execute_tools_and_build_final_prompt(
 
 请根据以上工具执行结果，用{pet_type}的性格风格回复。
 原始回复中可能已包含一些文字，你可以在此基础上结合工具结果完善回复。
-请直接输出最终回复内容，不要重复工具调用格式。"""
-    
-    final_reply = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback")
-    
+不要重复工具调用格式。以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
+{{"reply": "你的回复内容", "emotion": "用户情绪标签(happy/sad/anxious/tired/neutral)"}}
+其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。"""
+
+    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback")
+
     # 如果 LLM 生成回复成功，返回结果（并清理可能的 TOOL_CALL 标记）
-    if final_reply:
+    if raw_final:
+        # 解析结构化输出；工具轮次也提取 emotion 供调用方使用
+        parsed_final, tool_emotion = parse_structured_reply(raw_final)
         # 再次清理可能的 TOOL_CALL 标记
-        cleaned_final = tool_executor.remove_tool_calls(final_reply)
-        return cleaned_final, tool_results
-    
+        cleaned_final = tool_executor.remove_tool_calls(parsed_final)
+        return cleaned_final, tool_results, tool_emotion
+
     # LLM 调用失败时，生成包含工具结果的 fallback 回复
     if tool_results:
         # 从工具结果中提取关键信息
@@ -288,14 +345,16 @@ async def execute_tools_and_build_final_prompt(
             "cold_cat": f"哼...{weather_info}",
             "mouse": f"鼠鼠查到啦：{weather_info}"
         }
-        return fallback_replys.get(pet_type, f"查询结果：{weather_info}"), tool_results
-    
+        return fallback_replys.get(pet_type, f"查询结果：{weather_info}"), tool_results, "neutral"
+
     # 没有工具结果时使用原始回复
-    return cleaned_reply or reply, tool_results
+    return cleaned_reply or reply, tool_results, "neutral"
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
-async def chat(session_id: str, request: ChatRequest):
+@limiter.limit("20/minute")
+async def chat(request: Request, session_id: str, chat_req: ChatRequest, background_tasks: BackgroundTasks):
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -308,8 +367,8 @@ async def chat(session_id: str, request: ChatRequest):
 
         session_dict = dict(session)
 
-        # Session 归属验证：当前阶段 user_id 统一为 "default_user"
-        if session_dict.get("user_id") != "default_user":
+        # Session 归属验证
+        if session_dict.get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
         pet_type = session_dict["pet_type"]
@@ -353,7 +412,7 @@ async def chat(session_id: str, request: ChatRequest):
             if random.random() < 0.3:
                 # 懒说话时仍需检查是否需要分享日常
                 daily_share = None
-                if random.randint(1, 100) % 3 == 0:
+                if random.random() < 0.33:
                     daily_content = await generate_share_daily_message(pet_type, pet_name)
                     await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
                     daily_share = {"role": "assistant", "content": daily_content}
@@ -369,19 +428,19 @@ async def chat(session_id: str, request: ChatRequest):
                     daily_share=daily_share
                 )
 
-    user_msg_id = await memory_service.save_message(session_id, "user", request.content)
+    user_msg_id = await memory_service.save_message(session_id, "user", chat_req.content)
 
     # 为用户消息生成向量（异步，失败不影响主流程）
-    user_msg_embedding = await embedding_service.embed(request.content)
+    user_msg_embedding = await embedding_service.embed(chat_req.content)
 
     # 对用户输入做安全过滤，防止 prompt 注入
-    sanitized_content = _sanitize_user_input(request.content)
+    sanitized_content = _sanitize_user_input(chat_req.content)
     if user_msg_embedding:
         await embedding_service.save_vector(
             session_id=session_id,
             source_type="message",
             source_id=user_msg_id,
-            content=request.content,
+            content=chat_req.content,
             embedding=user_msg_embedding
         )
 
@@ -499,22 +558,30 @@ Agent 需要自主从用户消息中识别位置信息：
 5. 如果没有日程或不需要工具，不要添加任何标记
 6. 调用工具后，系统会返回工具执行结果，请根据结果回复用户
 {catchphrase_rule}
-请用{pet_type}的性格风格回复，直接输出回复内容。"""
+请用{pet_type}的性格风格回复，并以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
+{{"reply": "你的回复内容", "emotion": "用户情绪标签(happy/sad/anxious/tired/neutral)"}}
+其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。"""
 
-    reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")
-    if not reply:
+    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")
+    if not raw_reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
             "cold_cat": "......不想说话。",
             "mouse": "鼠鼠我啊......突然不知道怎么回答了......",
             "custom": f"{pet_name}啊......突然不知道怎么回答了......"
         }
-        reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
-    
+        raw_reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
+
+    reply, emotion_tag = parse_structured_reply(raw_reply)
+
     # 执行工具调用并生成最终回复（ReAct 模式）
-    reply, tool_results = await execute_tools_and_build_final_prompt(
+    reply, tool_results, tool_emotion = await execute_tools_and_build_final_prompt(
         reply, full_prompt, pet_type
     )
+
+    # 如果工具路径的二次 LLM 给出了有意义的情绪标签，则覆盖首轮情绪
+    if tool_emotion and tool_emotion != "neutral":
+        emotion_tag = tool_emotion
 
     # 解析日程标记
     schedule_extracted = None
@@ -557,8 +624,6 @@ Agent 需要自主从用户消息中识别位置信息：
     except Exception as e:
         logger.warning("User profile agent error: %s", e)
 
-    emotion_tag = await llm_service.extract_emotion(request.content, pet_type)
-
     assistant_msg_id = await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
 
     # 为助手回复生成向量
@@ -580,7 +645,7 @@ Agent 需要自主从用户消息中识别位置信息：
     memory_compressed = False
     recent_for_compress = await memory_service.get_short_term_messages(session_id, limit=10)
     recent_dicts = [{"role": m.role, "content": m.content} for m in recent_for_compress]
-    should_compress = await memory_service.should_compress(session_id, recent_dicts, request.content)
+    should_compress = await memory_service.should_compress(session_id, recent_dicts, chat_req.content)
     if should_compress:
         all_messages = await memory_service.get_short_term_messages(session_id, limit=100)
         window_ids = set(m.message_id for m in recent_for_compress)
@@ -598,13 +663,21 @@ Agent 需要自主从用户消息中识别位置信息：
     
     # 随机分享日常（约33%概率）
     daily_share = None
-    
+
     import random
-    if random.randint(1, 100) % 3 == 0 and session_dict.get("pet_status") != "hiding":
+    if random.random() < 0.33 and session_dict.get("pet_status") != "hiding":
         daily_content = await generate_share_daily_message(pet_type, pet_name)
         await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
         daily_share = {"role": "assistant", "content": daily_content}
         logger.debug("Daily share triggered: %s", daily_content)
+
+    # 每 5 轮触发后台情绪趋势分析（零阻塞）
+    if mood_agent.should_trigger(session_id, new_total_chats):
+        background_tasks.add_task(
+            mood_agent.analyze_mood_tendency,
+            user_id=session_dict["user_id"],
+            session_id=session_id
+        )
 
     return ChatResponse(
         reply=reply,
@@ -619,7 +692,8 @@ Agent 需要自主从用户消息中识别位置信息：
 
 
 @router.get("/{session_id}/messages", response_model=MessageListResponse)
-async def get_messages(session_id: str):
+async def get_messages(session_id: str, request: Request):
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT user_id FROM pet_sessions WHERE session_id = ?",
@@ -628,7 +702,8 @@ async def get_messages(session_id: str):
         session = await cursor.fetchone()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        if dict(session).get("user_id") != "default_user":
+        # Session 归属验证
+        if dict(session).get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
     messages = await memory_service.get_short_term_messages(session_id, limit=100)

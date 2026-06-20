@@ -18,9 +18,16 @@ class ChatApp {
             return;
         }
 
+        this.currentVisitId = null;
+        this.visitHostName = '';
+        this.visitGuestName = '';
+        this.visitIsLoading = false;
+
         this.renderPetInfo();
+        this.updateIntimacy(this.intimacy);
         this.loadHistoryMessages();
         this.bindEvents();
+        this.initVisitFeature();
     }
 
     // 宠物类型对应的 emoji
@@ -147,6 +154,8 @@ class ChatApp {
         document.getElementById('pet-color').style.background = petColor;
         document.getElementById('pet-color').textContent = petName;
         document.getElementById('header-pet-name').textContent = petName;
+        document.documentElement.style.setProperty('--pet-accent', petColor);
+        document.documentElement.style.setProperty('--pet-accent-soft', this.hexToRgba(petColor, 0.16));
     }
 
     loadWelcomeMessage() {
@@ -204,12 +213,14 @@ class ChatApp {
         const sendBtn = document.getElementById('send-btn');
 
         sendBtn.addEventListener('click', () => this.sendMessage());
+        input.addEventListener('input', () => this.autoResizeTextarea(input));
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
             }
         });
+        this.autoResizeTextarea(input);
 
         document.getElementById('simulate-day').addEventListener('click', () => this.simulateTime('next_day'));
         document.getElementById('simulate-schedule').addEventListener('click', () => this.simulateTime('schedule_trigger'));
@@ -219,6 +230,27 @@ class ChatApp {
         });
 
         document.getElementById('memory-panel-btn').addEventListener('click', () => this.toggleMemoryPanel());
+
+        const learnBtn = document.getElementById('learn-with-me-btn');
+        if (learnBtn) {
+            learnBtn.addEventListener('click', () => this.goToLearn());
+        }
+    }
+
+    /**
+     * 跳转到「陪我学」页：预置宠物用 pet_type 作为 pet_id，
+     * 自定义宠物用 qagent_custom_pet_id（UUID）。
+     */
+    goToLearn() {
+        const isCustom = this.petType === 'custom';
+        const petId = isCustom
+            ? localStorage.getItem('qagent_custom_pet_id')
+            : this.petType;
+        if (!petId) {
+            alert('当前宠物信息缺失，请重新选择宠物后再试');
+            return;
+        }
+        window.location.href = `learn.html?pet_id=${encodeURIComponent(petId)}`;
     }
 
     addMessage(msg) {
@@ -276,6 +308,7 @@ class ChatApp {
 
         this.isLoading = true;
         input.value = '';
+        this.autoResizeTextarea(input);
         this.showLoading(true);
 
         this.addMessage({
@@ -325,6 +358,7 @@ class ChatApp {
         const level = this.getIntimacyLevel(intimacy);
         document.getElementById('intimacy-value').textContent = intimacy;
         document.getElementById('intimacy-level').textContent = level;
+        this.syncIntimacyRing(intimacy);
     }
 
     updateTotalChats(total) {
@@ -357,14 +391,14 @@ class ChatApp {
                     created_at: new Date().toISOString()
                 });
             } else {
-                this.showNotification('🐱 Cold Cat 选择不回复...');
+                this.showNotification('宠物这会儿没有回应。');
             }
 
             if (response.pet_status === 'hiding') {
-                document.getElementById('pet-status').textContent = '躲藏中';
+                document.getElementById('pet-status').textContent = '躲起来了';
                 document.getElementById('pet-status').className = 'pet-status hiding';
             } else {
-                document.getElementById('pet-status').textContent = '正常';
+                document.getElementById('pet-status').textContent = '在线陪伴';
                 document.getElementById('pet-status').className = 'pet-status normal';
             }
 
@@ -372,13 +406,44 @@ class ChatApp {
             alert('模拟失败: ' + error.message);
         } finally {
             btn.disabled = false;
-            btn.textContent = mode === 'next_day' ? '模拟隔天' : '触发日程';
+            btn.textContent = mode === 'next_day' ? '推进到隔天' : '触发一次日程提醒';
         }
     }
 
     showLoading(show) {
         const loading = document.getElementById('loading-indicator');
         loading.style.display = show ? 'flex' : 'none';
+    }
+
+    syncIntimacyRing(intimacy) {
+        const ring = document.getElementById('intimacy-ring');
+        if (!ring) return;
+
+        const radius = 45;
+        const circumference = 2 * Math.PI * radius;
+        const safeValue = Math.max(0, Math.min(100, intimacy));
+        const offset = circumference - (safeValue / 100) * circumference;
+
+        ring.style.strokeDasharray = `${circumference}`;
+        ring.style.strokeDashoffset = `${offset}`;
+    }
+
+    autoResizeTextarea(input) {
+        if (!input) return;
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    }
+
+    hexToRgba(hex, alpha) {
+        const normalized = hex.replace('#', '');
+        if (normalized.length !== 6) {
+            return `rgba(238, 108, 77, ${alpha})`;
+        }
+
+        const r = parseInt(normalized.slice(0, 2), 16);
+        const g = parseInt(normalized.slice(2, 4), 16);
+        const b = parseInt(normalized.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     }
 
     showNotification(message) {
@@ -525,6 +590,210 @@ class ChatApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    async initVisitFeature() {
+        const btn = document.getElementById('invite-visit-btn');
+        if (!btn) return;
+
+        try {
+            const data = await API.listCustomPets();
+            const allCustomPets = data.pets || [];
+            const hostCustomPetId = localStorage.getItem('qagent_custom_pet_id');
+            const otherCustomPets = allCustomPets.filter(p => p.pet_id !== hostCustomPetId);
+
+            if (otherCustomPets.length >= 1 || allCustomPets.length >= 1) {
+                btn.style.display = 'block';
+                btn.addEventListener('click', () => this.openVisitModal(allCustomPets));
+            }
+        } catch (e) {
+            console.warn('visit feature init failed:', e);
+        }
+    }
+
+    async openVisitModal(allCustomPets) {
+        const modal = document.getElementById('visit-guest-modal');
+        const list = document.getElementById('visit-guest-list');
+        const startBtn = document.getElementById('visit-start-btn');
+        const cancelBtn = document.getElementById('visit-cancel-btn');
+
+        const hostCustomPetId = localStorage.getItem('qagent_custom_pet_id');
+
+        const guests = [];
+        const otherCustomPets = allCustomPets.filter(p => p.pet_id !== hostCustomPetId);
+        otherCustomPets.forEach(p => {
+            guests.push({ id: p.pet_id, name: p.pet_name, isPreset: false });
+        });
+
+        const presetGuests = [
+            { id: 'hot_dog', name: 'Hot Dog' },
+            { id: 'cold_cat', name: 'Cold Cat' },
+            { id: 'mouse', name: '鼠鼠' }
+        ];
+        presetGuests.forEach(p => guests.push({ ...p, isPreset: true }));
+
+        list.innerHTML = '';
+        let selectedGuestId = null;
+
+        if (guests.length === 0) {
+            list.innerHTML = '<p style="color:#888;font-size:13px;padding:8px;">没有可串门的宠物</p>';
+        }
+
+        guests.forEach(g => {
+            const item = document.createElement('div');
+            item.className = 'visit-guest-item';
+            item.dataset.guestId = g.id;
+            item.textContent = g.name + (g.isPreset ? ' (预置)' : '');
+            item.addEventListener('click', () => {
+                list.querySelectorAll('.visit-guest-item').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
+                selectedGuestId = g.id;
+            });
+            list.appendChild(item);
+        });
+
+        modal.style.display = 'flex';
+
+        startBtn.onclick = async () => {
+            if (!selectedGuestId) {
+                alert('请先选择一只宠物');
+                return;
+            }
+            const topic = document.getElementById('visit-topic-input').value.trim() || null;
+            modal.style.display = 'none';
+            await this.startVisit(selectedGuestId, topic);
+        };
+
+        cancelBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
+    }
+
+    async startVisit(guestPetId, topic) {
+        this.visitIsLoading = true;
+        const panel = document.getElementById('visit-panel');
+        const messagesDiv = document.getElementById('visit-messages');
+        messagesDiv.innerHTML = '';
+        panel.style.display = 'flex';
+
+        try {
+            const data = await API.startVisit(this.sessionId, guestPetId, topic);
+            this.currentVisitId = data.visit_id;
+            this.visitHostName = data.host_pet_name;
+            this.visitGuestName = data.guest_pet_name;
+
+            document.getElementById('visit-host-name').textContent = data.host_pet_name;
+            document.getElementById('visit-guest-name').textContent = data.guest_pet_name;
+            document.getElementById('visit-host-avatar').textContent = this.getPetEmoji(this.petType === 'custom' ? this._getRawPetType() : this.petType);
+            document.getElementById('visit-guest-avatar').textContent = '🐾';
+            document.getElementById('visit-topic-display').textContent = topic ? `话题: ${topic}` : '随便聊聊';
+
+            this.addVisitBubble(data.opening_message.speaker, data.opening_message.content, 'host');
+            this.bindVisitControls();
+
+        } catch (e) {
+            panel.style.display = 'none';
+            alert('发起串门失败: ' + e.message);
+        } finally {
+            this.visitIsLoading = false;
+        }
+    }
+
+    _getRawPetType() {
+        try {
+            const stored = localStorage.getItem('qagent_custom_pet');
+            return stored ? JSON.parse(stored).pet_type : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    addVisitBubble(speakerName, content, side) {
+        const messagesDiv = document.getElementById('visit-messages');
+        const bubble = document.createElement('div');
+        bubble.className = `visit-bubble ${side === 'host' ? 'host-bubble' : 'guest-bubble'}`;
+        bubble.innerHTML = `<div class="visit-bubble-name">${this.escapeHtml(speakerName)}</div><p>${this.escapeHtml(content)}</p>`;
+        messagesDiv.appendChild(bubble);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    bindVisitControls() {
+        const nextBtn = document.getElementById('visit-next-btn');
+        const endBtn = document.getElementById('visit-end-btn');
+
+        nextBtn.onclick = null;
+        endBtn.onclick = null;
+
+        nextBtn.onclick = () => this.runAutoVisitTurns(6);
+        endBtn.onclick = () => this.endVisit();
+    }
+
+    async runAutoVisitTurns(maxTurns) {
+        const nextBtn = document.getElementById('visit-next-btn');
+        const endBtn = document.getElementById('visit-end-btn');
+        const loadingEl = document.getElementById('visit-loading');
+        const interjectionInput = document.getElementById('visit-interjection-input');
+
+        nextBtn.disabled = true;
+        endBtn.disabled = true;
+        this.visitIsLoading = true;
+
+        let guestTurn = true;
+
+        for (let i = 0; i < maxTurns; i++) {
+            if (!this.currentVisitId) break;
+
+            const interjection = (i === 0 && interjectionInput.value.trim()) ? interjectionInput.value.trim() : '';
+            if (i === 0) interjectionInput.value = '';
+
+            loadingEl.style.display = 'flex';
+
+            try {
+                const speaker = guestTurn ? 'guest' : 'host';
+                const data = await API.nextVisitTurn(this.currentVisitId, interjection, speaker);
+                loadingEl.style.display = 'none';
+
+                if (data.message) {
+                    const side = data.message.speaker === this.visitHostName ? 'host' : 'guest';
+                    this.addVisitBubble(data.message.speaker, data.message.content, side);
+                }
+
+                if (data.visit_status !== 'active') break;
+                guestTurn = !guestTurn;
+
+                await new Promise(r => setTimeout(r, 800));
+            } catch (e) {
+                loadingEl.style.display = 'none';
+                if (e.message && e.message.includes('limit reached')) {
+                    this.showNotification('串门消息已达上限');
+                    break;
+                }
+                console.error('visit turn error:', e);
+                break;
+            }
+        }
+
+        loadingEl.style.display = 'none';
+        this.visitIsLoading = false;
+        nextBtn.disabled = false;
+        endBtn.disabled = false;
+    }
+
+    async endVisit() {
+        if (!this.currentVisitId) {
+            document.getElementById('visit-panel').style.display = 'none';
+            return;
+        }
+
+        try {
+            await API.endVisit(this.currentVisitId, true);
+            this.showNotification('串门已结束，对话亮点已写入记忆');
+        } catch (e) {
+            console.warn('end visit error:', e);
+        } finally {
+            this.currentVisitId = null;
+            document.getElementById('visit-panel').style.display = 'none';
+        }
     }
 }
 

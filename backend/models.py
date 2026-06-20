@@ -65,3 +65,61 @@ class UserProfile:
     extra_info: Optional[str] = None
     created_at: datetime = None
     updated_at: datetime = None
+
+
+@dataclass
+class PetVisit:
+    visit_id: str
+    host_session_id: str
+    guest_pet_id: str
+    guest_session_id: Optional[str]
+    initiator_user_id: str
+    topic: Optional[str]
+    status: str = "active"
+    created_at: datetime = None
+    ended_at: Optional[datetime] = None
+
+
+@dataclass
+class PetVisitMessage:
+    msg_id: str
+    visit_id: str
+    speaker_pet_id: str
+    speaker_name: str
+    content: str
+    turn_index: int
+    created_at: datetime = None
+
+
+@dataclass
+class LearningSession:
+    """陪我学：学习会话"""
+    session_id: str
+    user_id: str
+    pet_id: str
+    pet_source: str = "preset"  # preset / custom
+    github_url: str = ""
+    repo_owner: str = ""
+    repo_name: str = ""
+    repo_full_name: str = ""
+    repo_description: Optional[str] = None
+    outline_json: str = "[]"
+    current_chapter: int = 1
+    status: str = "active"  # active / paused / completed
+    rewarded_chapters_json: str = "[]"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+@dataclass
+class LearningMessage:
+    """陪我学：学习过程中的消息记录"""
+    msg_id: str
+    session_id: str
+    chapter_id: Optional[int] = None
+    role: str = ""  # system / teacher / pet / user
+    target: Optional[str] = None  # teacher / pet，用于用户提问
+    content: str = ""
+    metadata_json: Optional[str] = None
+    created_at: Optional[datetime] = None

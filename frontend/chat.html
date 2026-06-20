@@ -4,29 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>和宠物聊天 - QAgent Pet</title>
-    <link rel="stylesheet" href="css/chat.css?v=2">
+    <link rel="stylesheet" href="css/chat.css?v=3">
 </head>
 <body>
     <div class="chat-container">
-        <div class="sidebar">
+        <aside class="sidebar">
             <div class="sidebar-header">
-                <button id="back-btn" class="back-btn">← 返回</button>
-                <button id="memory-panel-btn" class="memory-btn">📊 记忆面板</button>
-            </div>
-            
-            <div class="pet-info">
-                <div class="pet-avatar-large" id="pet-emoji"><img src="images/hot_dog.png" alt="宠物" class="pet-avatar-img"></div>
-                <h2 id="pet-name">Hot Dog</h2>
-                <div class="pet-badge" id="pet-color" style="background: #ff6b6b;">Hot Dog</div>
-                <span id="pet-status" class="pet-status normal">正常</span>
+                <button id="back-btn" class="back-btn">← 返回宠物广场</button>
+                <button id="memory-panel-btn" class="memory-btn">记忆档案</button>
             </div>
 
-            <div class="intimacy-section">
+            <div class="pet-info">
+                <div class="pet-avatar-large" id="pet-emoji">
+                    <img src="images/hot_dog.png" alt="宠物" class="pet-avatar-img">
+                </div>
+                <h2 id="pet-name">Hot Dog</h2>
+                <div class="pet-badge" id="pet-color" style="background: #ee6c4d;">Hot Dog</div>
+                <span id="pet-status" class="pet-status normal">在线陪伴</span>
+            </div>
+
+            <section class="info-card intimacy-section">
                 <h3>亲密度</h3>
                 <div class="intimacy-circle">
                     <svg viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="45" fill="none" stroke="#eee" stroke-width="8"/>
-                        <circle id="intimacy-ring" cx="50" cy="50" r="45" fill="none" stroke="#ff6b6b" stroke-width="8"
+                        <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(84, 62, 40, 0.12)" stroke-width="8"/>
+                        <circle id="intimacy-ring" cx="50" cy="50" r="45" fill="none" stroke="#ee6c4d" stroke-width="8"
                                 stroke-dasharray="283" stroke-dashoffset="283" stroke-linecap="round"/>
                     </svg>
                     <div class="intimacy-text">
@@ -34,29 +36,44 @@
                         <small id="intimacy-level">陌生</small>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <div class="stats-section">
+            <section class="info-card stats-section">
+                <h3>互动统计</h3>
                 <div class="stat-item">
                     <span class="stat-label">累计对话</span>
-                    <span id="total-chats" class="stat-value">0</span> 轮
+                    <div class="stat-value-group">
+                        <span id="total-chats" class="stat-value">0</span>
+                        <span class="stat-unit">轮</span>
+                    </div>
                 </div>
-            </div>
+            </section>
 
-            <div class="simulate-section">
+            <section class="info-card simulate-section">
                 <h3>模拟控制</h3>
-                <button id="simulate-day" class="simulate-btn">模拟隔天</button>
-                <button id="simulate-schedule" class="simulate-btn secondary">触发日程</button>
-            </div>
-        </div>
+                <div class="simulate-actions">
+                    <button id="simulate-day" class="simulate-btn">推进到隔天</button>
+                    <button id="simulate-schedule" class="simulate-btn secondary">触发一次日程提醒</button>
+                </div>
+            </section>
 
-        <div class="main-chat">
+            <section class="info-card learn-section">
+                <h3>陪我学</h3>
+                <p class="learn-desc">让宠物陪你去读一个 GitHub 开源项目，分章节学完还能涨亲密。</p>
+                <button id="learn-with-me-btn" class="learn-btn">📚 和宠物一起学</button>
+            </section>
+        </aside>
+
+        <main class="main-chat">
             <div class="chat-header">
-                <span class="chat-title">和 <span id="header-pet-name">Hot Dog</span> 聊天中</span>
+                <div class="chat-header-meta">
+                    <span class="chat-title">正在和 <span id="header-pet-name">Hot Dog</span> 聊天</span>
+                    <span class="chat-subtitle">消息会持续沉淀为宠物记忆与用户画像。</span>
+                </div>
+                <button id="invite-visit-btn" class="invite-visit-btn" style="display:none;" title="邀请另一只宠物来串门">邀请串门</button>
             </div>
 
-            <div id="messages-container" class="messages-container">
-            </div>
+            <div id="messages-container" class="messages-container"></div>
 
             <div id="loading-indicator" class="loading-indicator" style="display: none;">
                 <div class="loading-dots">
@@ -65,85 +82,141 @@
             </div>
 
             <div class="input-area">
-                <textarea id="message-input" placeholder="输入消息..." rows="1"></textarea>
-                <button id="send-btn">发送</button>
+                <div class="input-shell">
+                    <textarea id="message-input" placeholder="输入消息，按 Enter 发送，Shift + Enter 换行。" rows="1"></textarea>
+                    <button id="send-btn">发送</button>
+                </div>
+                <div class="input-tip">💬 聊得越多，它越懂你</div>
             </div>
-        </div>
 
-        <div id="memory-panel" class="memory-panel" style="display: none;">
-            <h3>记忆面板</h3>
-            <div class="panel-section">
-                <h4>亲密度</h4>
-                <p><span id="panel-intimacy">0</span> - <span id="panel-intimacy-level">陌生</span></p>
-            </div>
-            <div class="panel-section">
-                <h4>累计对话</h4>
-                <p><span id="panel-total-chats">0</span> 轮</p>
-            </div>
-            <div class="panel-section">
-                <h4>用户画像</h4>
-                <div class="profile-grid">
-                    <div class="profile-item">
-                        <span class="profile-label">📍 地区</span>
-                        <span id="profile-region" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-region">
-                            <button class="edit-btn" onclick="chatApp.editProfile('region')">✏️</button>
+            <div id="visit-panel" class="visit-panel-overlay" style="display:none;">
+                <div class="visit-panel">
+                    <div class="visit-panel-header">
+                        <div class="visit-pet-header">
+                            <div class="visit-pet-side host-side">
+                                <div id="visit-host-avatar" class="visit-avatar"></div>
+                                <span id="visit-host-name" class="visit-pet-label"></span>
+                            </div>
+                            <span class="visit-vs">VS</span>
+                            <div class="visit-pet-side guest-side">
+                                <div id="visit-guest-avatar" class="visit-avatar"></div>
+                                <span id="visit-guest-name" class="visit-pet-label"></span>
+                            </div>
                         </div>
+                        <div id="visit-topic-display" class="visit-topic"></div>
                     </div>
-                    <div class="profile-item">
-                        <span class="profile-label">👤 身份</span>
-                        <span id="profile-identity" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-identity">
-                            <button class="edit-btn" onclick="chatApp.editProfile('identity')">✏️</button>
-                        </div>
+
+                    <div id="visit-messages" class="visit-messages"></div>
+
+                    <div id="visit-loading" class="visit-loading" style="display:none;">
+                        <span></span><span></span><span></span>
                     </div>
-                    <div class="profile-item">
-                        <span class="profile-label">🎯 兴趣</span>
-                        <span id="profile-interests" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-interests">
-                            <button class="edit-btn" onclick="chatApp.editProfile('interests')">✏️</button>
-                        </div>
-                    </div>
-                    <div class="profile-item">
-                        <span class="profile-label">💼 职业</span>
-                        <span id="profile-occupation" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-occupation">
-                            <button class="edit-btn" onclick="chatApp.editProfile('occupation')">✏️</button>
-                        </div>
-                    </div>
-                    <div class="profile-item">
-                        <span class="profile-label">🧠 性格</span>
-                        <span id="profile-personality_hint" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-personality_hint">
-                            <button class="edit-btn" onclick="chatApp.editProfile('personality_hint')">✏️</button>
-                        </div>
-                    </div>
-                    <div class="profile-item">
-                        <span class="profile-label">⏰ 活跃时段</span>
-                        <span id="profile-active_hours" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-active_hours">
-                            <button class="edit-btn" onclick="chatApp.editProfile('active_hours')">✏️</button>
-                        </div>
-                    </div>
-                    <div class="profile-item">
-                        <span class="profile-label">💭 情绪倾向</span>
-                        <span id="profile-mood_tendency" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-mood_tendency">
-                            <button class="edit-btn" onclick="chatApp.editProfile('mood_tendency')">✏️</button>
-                        </div>
-                    </div>
-                    <div class="profile-item">
-                        <span class="profile-label">📝 其他</span>
-                        <span id="profile-extra_info" class="profile-value">未知</span>
-                        <div class="profile-actions" id="actions-extra_info">
-                            <button class="edit-btn" onclick="chatApp.editProfile('extra_info')">✏️</button>
+
+                    <div class="visit-controls">
+                        <input id="visit-interjection-input" type="text" class="visit-topic-input" placeholder="给他们插一句话..." maxlength="100">
+                        <div class="visit-buttons">
+                            <button id="visit-next-btn" class="visit-action-btn">继续聊下去</button>
+                            <button id="visit-end-btn" class="visit-action-btn secondary">结束串门</button>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="panel-section">
-                <h4>长期记忆</h4>
-                <p class="empty-hint">暂无长期记忆</p>
+
+            <aside id="memory-panel" class="memory-panel" style="display: none;">
+                <h3>记忆档案</h3>
+
+                <div class="panel-section">
+                    <h4>会话亲密度</h4>
+                    <p><span id="panel-intimacy">0</span> · <span id="panel-intimacy-level">陌生</span></p>
+                </div>
+
+                <div class="panel-section">
+                    <h4>累计对话轮数</h4>
+                    <p><span id="panel-total-chats">0</span> 轮</p>
+                </div>
+
+                <div class="panel-section">
+                    <h4>用户画像</h4>
+                    <div class="profile-grid">
+                        <div class="profile-item">
+                            <span class="profile-label">📍 地区</span>
+                            <span id="profile-region" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-region">
+                                <button class="edit-btn" onclick="chatApp.editProfile('region')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">👤 身份</span>
+                            <span id="profile-identity" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-identity">
+                                <button class="edit-btn" onclick="chatApp.editProfile('identity')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">🎯 兴趣</span>
+                            <span id="profile-interests" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-interests">
+                                <button class="edit-btn" onclick="chatApp.editProfile('interests')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">💼 职业</span>
+                            <span id="profile-occupation" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-occupation">
+                                <button class="edit-btn" onclick="chatApp.editProfile('occupation')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">🧠 性格</span>
+                            <span id="profile-personality_hint" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-personality_hint">
+                                <button class="edit-btn" onclick="chatApp.editProfile('personality_hint')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">⏰ 活跃时段</span>
+                            <span id="profile-active_hours" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-active_hours">
+                                <button class="edit-btn" onclick="chatApp.editProfile('active_hours')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">💭 情绪倾向</span>
+                            <span id="profile-mood_tendency" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-mood_tendency">
+                                <button class="edit-btn" onclick="chatApp.editProfile('mood_tendency')">✏️</button>
+                            </div>
+                        </div>
+                        <div class="profile-item">
+                            <span class="profile-label">📝 其他</span>
+                            <span id="profile-extra_info" class="profile-value">未知</span>
+                            <div class="profile-actions" id="actions-extra_info">
+                                <button class="edit-btn" onclick="chatApp.editProfile('extra_info')">✏️</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h4>长期记忆</h4>
+                    <p class="empty-hint">当前版本仅展示画像摘要，长期记忆详情后续可继续扩展。</p>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <div id="visit-guest-modal" class="visit-modal-overlay" style="display:none;">
+        <div class="visit-modal">
+            <h3>选择串门宠物</h3>
+            <p style="font-size:13px;color:#6d5c4d;line-height:1.7;margin-bottom:12px;">你可以邀请自定义宠物或预设宠物进入当前会话，形成一段宠物之间的互动对话。</p>
+            <div id="visit-guest-list" class="visit-guest-list"></div>
+            <div style="margin-top:12px;">
+                <label style="display:block;font-size:13px;color:#6d5c4d;margin-bottom:6px;">串门话题（可选）</label>
+                <input id="visit-topic-input" type="text" class="visit-topic-input" placeholder="例如：今天谁更会安慰主人？" maxlength="30">
+            </div>
+            <div class="visit-modal-footer">
+                <button id="visit-start-btn" class="visit-action-btn">开始串门</button>
+                <button id="visit-cancel-btn" class="visit-action-btn secondary">取消</button>
             </div>
         </div>
     </div>

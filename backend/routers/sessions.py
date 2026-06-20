@@ -1,6 +1,9 @@
 import uuid
+import re
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from backend.database import get_db
 from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse, UserProfileUpdateRequest
 from backend.services.llm_service import llm_service
@@ -8,6 +11,17 @@ from backend.services.memory_service import memory_service
 from backend import prompts
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+limiter = Limiter(key_func=get_remote_address)
+
+UUID_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
+
+
+def _validate_uuid(value: str, field_name: str = "id") -> None:
+    if not value or not UUID_PATTERN.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
 
 
 def get_intimacy_level(intimacy: int) -> str:
@@ -22,10 +36,11 @@ def get_intimacy_level(intimacy: int) -> str:
 
 
 @router.post("", response_model=SessionResponse)
-async def create_session(request: SessionCreateRequest):
-    user_id = request.user_id
-    pet_type = request.pet_type
-    custom_pet_id = request.custom_pet_id
+@limiter.limit("10/minute")
+async def create_session(body: SessionCreateRequest, request: Request):
+    user_id = body.user_id
+    pet_type = body.pet_type
+    custom_pet_id = body.custom_pet_id
 
     # 支持自定义宠物类型
     valid_pet_types = ["hot_dog", "cold_cat", "mouse", "custom"]
@@ -72,7 +87,7 @@ async def create_session(request: SessionCreateRequest):
         user_exists = await user_row.fetchone()
 
         if not user_exists:
-            nickname = request.nickname or "主人"
+            nickname = body.nickname or "主人"
             await db.execute(
                 "INSERT INTO users (user_id, nickname, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (user_id, nickname, datetime.now(), datetime.now())
@@ -128,7 +143,7 @@ async def create_session(request: SessionCreateRequest):
             else:
                 welcome_content = f"你好！我是{pet_name}！"
         else:
-            pet_name = request.nickname or "小可爱"
+            pet_name = body.nickname or "小可爱"
             welcome_content = f"你好！我是你的专属宠物{pet_name}！"
     else:
         pet_info = pet_prompts.get(pet_type)
@@ -153,7 +168,9 @@ async def create_session(request: SessionCreateRequest):
 
 
 @router.get("/{session_id}")
-async def get_session(session_id: str):
+@limiter.limit("60/minute")
+async def get_session(session_id: str, request: Request):
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -165,7 +182,8 @@ async def get_session(session_id: str):
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_dict = dict(session)
-        if session_dict.get("user_id") != "default_user":
+        # Session 归属验证
+        if session_dict.get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
         return session_dict
@@ -218,12 +236,14 @@ async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
 
 
 @router.post("/{session_id}/share-daily")
-async def share_daily(session_id: str):
+@limiter.limit("30/minute")
+async def share_daily(session_id: str, request: Request):
     """
     分享日常 API
     - 前端调用：用户打开页面时概率触发（随机数整除3）
     - 内部调用：模拟隔天后必定触发
     """
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -237,7 +257,7 @@ async def share_daily(session_id: str):
         session_dict = dict(session)
 
         # Session 归属验证
-        if session_dict.get("user_id") != "default_user":
+        if session_dict.get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
         pet_type = session_dict["pet_type"]
@@ -264,15 +284,17 @@ async def share_daily(session_id: str):
 
 
 @router.post("/{session_id}/share-daily-random")
-async def share_daily_random(session_id: str):
+@limiter.limit("30/minute")
+async def share_daily_random(session_id: str, request: Request):
     """
     概率触发分享日常
-    生成随机数，如果能整除3（约33%概率），则分享日常
+    约33%概率触发分享日常
     """
     import random
-    rand_num = random.randint(1, 100)
-    
-    if rand_num % 3 == 0:
+
+    _validate_uuid(session_id, "session_id")
+
+    if random.random() < 0.33:
         # 触发分享日常
         result = await share_daily(session_id)
         return {"triggered": True, **result}
@@ -281,7 +303,9 @@ async def share_daily_random(session_id: str):
 
 
 @router.post("/{session_id}/simulate-time", response_model=SimulateTimeResponse)
-async def simulate_time(session_id: str, request: SimulateTimeRequest):
+@limiter.limit("10/minute")
+async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Request):
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -295,7 +319,7 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
         session_dict = dict(session)
 
         # Session 归属验证
-        if session_dict.get("user_id") != "default_user":
+        if session_dict.get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
         pet_type = session_dict["pet_type"]
@@ -319,7 +343,7 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
             "mouse": "鼠鼠我啊......鼓起勇气来见主人了......"
         }
 
-        if request.mode == "next_day":
+        if body.mode == "next_day":
             # 首先检查是否有待触发的日程
             cursor = await db.execute(
                 "SELECT * FROM schedules WHERE session_id = ? AND is_triggered = 0",
@@ -374,7 +398,7 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
                 proactive_message = {"role": "assistant", "content": daily_content}
                 await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
 
-        elif request.mode == "schedule_trigger":
+        elif body.mode == "schedule_trigger":
             cursor = await db.execute(
                 "SELECT * FROM schedules WHERE session_id = ? AND is_triggered = 0 ORDER BY scheduled_time LIMIT 1",
                 (session_id,)
@@ -409,7 +433,9 @@ async def simulate_time(session_id: str, request: SimulateTimeRequest):
 
 
 @router.get("/{session_id}/memory", response_model=MemoryPanelResponse)
-async def get_memory_panel(session_id: str):
+@limiter.limit("60/minute")
+async def get_memory_panel(session_id: str, request: Request):
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM pet_sessions WHERE session_id = ?",
@@ -423,7 +449,7 @@ async def get_memory_panel(session_id: str):
         session_dict = dict(session)
 
         # Session 归属验证
-        if session_dict.get("user_id") != "default_user":
+        if session_dict.get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
         intimacy = session_dict["intimacy"]
         total_chats = session_dict["total_chats"]
@@ -455,10 +481,12 @@ async def get_memory_panel(session_id: str):
 
 
 @router.put("/{session_id}/profile", response_model=UserProfileUpdateRequest)
-async def update_user_profile(session_id: str, request: UserProfileUpdateRequest):
+@limiter.limit("10/minute")
+async def update_user_profile(session_id: str, body: UserProfileUpdateRequest, request: Request):
     """
     更新用户画像（用户手动编辑）
     """
+    _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT user_id FROM pet_sessions WHERE session_id = ?",
@@ -472,18 +500,18 @@ async def update_user_profile(session_id: str, request: UserProfileUpdateRequest
         user_id = dict(zip([d[0] for d in cursor.description], session))["user_id"]
 
         # Session 归属验证
-        if user_id != "default_user":
+        if user_id != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
         profile_data = {
-            "region": request.region if request.region else "未知",
-            "identity": request.identity if request.identity else "未知",
-            "interests": request.interests if request.interests else "未知",
-            "occupation": request.occupation if request.occupation else "未知",
-            "personality_hint": request.personality_hint if request.personality_hint else "未知",
-            "active_hours": request.active_hours if request.active_hours else "未知",
-            "mood_tendency": request.mood_tendency if request.mood_tendency else "未知",
-            "extra_info": request.extra_info if request.extra_info else "未知"
+            "region": body.region if body.region else "未知",
+            "identity": body.identity if body.identity else "未知",
+            "interests": body.interests if body.interests else "未知",
+            "occupation": body.occupation if body.occupation else "未知",
+            "personality_hint": body.personality_hint if body.personality_hint else "未知",
+            "active_hours": body.active_hours if body.active_hours else "未知",
+            "mood_tendency": body.mood_tendency if body.mood_tendency else "未知",
+            "extra_info": body.extra_info if body.extra_info else "未知"
         }
 
         await memory_service.save_user_profile(user_id, profile_data)

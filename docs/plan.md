@@ -2,206 +2,237 @@
 
 ---
 
-## ✅ 已实现：口头禅概率控制
+需求：口头禅概率控制已实现。
 
-### 问题
+需求：自定义宠物持久化存储已实现。
 
-宠物 Agent 口头禅触发概率为 100%，每次回复都包含口头禅（如 Hot Dog 每次都说"汪汪，我好想你"），需要降低频率。
+需求：自定义宠物删除功能已实现。
 
-### 解决方法
+需求：自定义宠物开场白 LLM 生成已实现。
 
-采用**代码层面检测 + Prompt 动态注入**（方案 B）：
-
-1. 在 `chat.py` 中新增 `get_catchphrase()` 和 `detect_catchphrase_in_history()` 两个函数，检测最近 10 条 assistant 消息中口头禅是否已出现
-2. 消除 System Prompt 与动态规则的权威冲突——将 Prompt 文件中的 `口头禅是"XXX"` 改为 `口头禅由系统在对话时动态告知`
-3. 在 full_prompt 的【重要规则】区域动态追加指令：口头禅已出现 → `本次回复请不要使用口头禅`，未出现 → `本次回复请使用口头禅：'{具体文本}'`
-
-### 最终效果
-
-- 口头禅不再每轮都出现，由代码精确控制频率
-- 首轮对话自动触发口头禅，后续轮次间隔出现
-- 覆盖 3 种预置宠物和自定义宠物
-
-### 修改文件
-
-- `backend/routers/chat.py`：新增辅助函数 + 动态注入逻辑
-- `backend/prompts/hot_dog.py`、`cold_cat.py`、`mouse.py`、`custom_pet.py`：消除硬编码权威冲突
+需求：宠物 Agent 串门通信（Phase 1 核心功能 + Phase 2 记忆沉淀）已实现。
 
 ---
 
-## ✅ 已实现：自定义宠物持久化存储
+## [2026-06-17] Plan for 情绪感知两层架构重构
 
-### 问题
+### Requirement
 
-用户创建自定义宠物后，退出浏览器再打开，自定义宠物消失。根因：`custom_pets_storage` 是纯内存字典，服务器重启后数据丢失。
+将当前阻塞在响应路径中的独立 LLM 情绪识别调用（`llm_service.extract_emotion`）拆分为两层：
 
-### 解决方法
+- **前台**：将情绪标签（`emotion`，取值 `happy/sad/anxious/tired/neutral`）内嵌进主 LLM 调用，令主 LLM 在生成宠物回复的同时以 JSON 格式同步输出结构化字段，彻底消除额外的 LLM 调用。情绪标签写入 `messages.emotion_tag`，用于亲密度计算及 `ChatResponse` 返回前端。
+- **后台**：新增专职情绪后台 Agent，每隔 N 轮读取最近对话历史，输出用户的长期情绪倾向描述（如”最近持续焦虑，偶尔开心”），异步写入 `user_profiles.mood_tendency`。使用 `FastAPI BackgroundTasks` 实现零阻塞。
 
-将存储从内存字典迁移到 SQLite 数据库：
+### Design Overview
 
-1. **`database.py`**：新增 `custom_pets` 表（含 `user_id` 隔离 + 索引）
-2. **`custom_pets.py`**：删除 `custom_pets_storage` 字典，5 个 API 接口全部改为 `get_db()` 数据库读写
-3. **`chat.py`**：新增 `get_catchphrase_async()` 和 `get_custom_pet_info()`，从数据库查询替代内存字典
-4. **`sessions.py`**：欢迎语生成改为从数据库查询
+#### 前台：主 LLM 结构化输出
 
-### 最终效果
+当前 `full_prompt` 末尾要求 LLM”直接输出回复内容”，回复是纯文本。改造后要求 LLM 输出 JSON：
 
-- 自定义宠物数据持久化在 `qagent_pet.db`，重启/刷新不丢失
-- 支持用户隔离（`user_id` 字段）
-- 删除后聊天降级处理，不崩溃
+```json
+{
+  “reply”: “宠物的回复内容（含工具调用标记、日程标记等，与现在格式一致）”,
+  “emotion”: “neutral”
+}
+```
 
----
+**关键约束**：
+1. `reply` 字段内容与当前纯文本回复格式完全一致，工具调用标记 `[TOOL_CALL]...[/TOOL_CALL]`、日程标记 `[SCHEDULE:...]` 原样保留在 `reply` 字段内，下游解析逻辑不变。
+2. `emotion` 字段只能是五选一：`happy / sad / anxious / tired / neutral`。
+3. `_call_llm` 不新增结构化输出模式，改为在 `chat.py` 内直接解析 JSON 文本，失败时 `emotion` 降级为 `”neutral”`，`reply` 降级为原始文本。
 
-## 📋 待实现：自定义宠物开场白 LLM 生成
+**Prompt 末尾改动**（`chat.py` 中 `full_prompt` 末尾两行）：
 
-### 问题
+```
+# 删除
+请用{pet_type}的性格风格回复，直接输出回复内容。
 
-用户创建自定义宠物后，所有宠物的开场白都千篇一律。根因：`custom_pet.py` 的 `generate_welcome_messages()` 使用硬编码模板匹配，按性格标签返回固定 3 句话，完全没有 LLM 参与。例如所有"热情"标签的宠物开场白永远是 `"汪！主人！我等你好久啦！"`（狗味），无论实际是什么动物。
+# 替换为
+请用{pet_type}的性格风格回复，并以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
+{{“reply”: “你的回复内容”, “emotion”: “用户情绪标签(happy/sad/anxious/tired/neutral)”}}
+其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。
+```
 
-对比：预置宠物（Hot Dog/Cold Cat/鼠鼠）的开场白通过 `llm_service.generate_welcome_message()` 调用 LLM 根据身份和性格动态生成，每次不同且贴合角色。
-
-### 当前架构
+**JSON 解析辅助函数**（新增于 `chat.py`）：
 
 ```python
-# backend/prompts/custom_pet.py 第 359-405 行
-def generate_welcome_messages(pet_name, pet_type, personality_tags, catchphrase):
-    if "热情" in personality_tags or "活泼" in personality_tags:
-        welcomes = ["汪！主人！我等你好久啦！", ...]  # 硬编码，全是狗味
-    elif "高冷" in personality_tags or "傲娇" in personality_tags:
-        welcomes = ["哼...你来了啊。", ...]           # 硬编码
+def parse_structured_reply(raw: str) -> tuple[str, str]:
+    “””
+    解析主 LLM 的结构化输出，返回 (reply_text, emotion_tag)。
+    失败时返回 (raw, “neutral”)。
+    “””
+    import json, re
+    valid_emotions = {“happy”, “sad”, “anxious”, “tired”, “neutral”}
+    try:
+        # 尝试直接解析
+        data = json.loads(raw)
+        reply = data.get(“reply”, raw)
+        emotion = data.get(“emotion”, “neutral”).strip().lower()
+        if emotion not in valid_emotions:
+            emotion = “neutral”
+        return reply, emotion
+    except Exception:
+        # 尝试从文本中提取 JSON 块（LLM 有时会在 JSON 前后加文字）
+        match = re.search(r'\{.*?”reply”.*?”emotion”.*?\}', raw, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group())
+                reply = data.get(“reply”, raw)
+                emotion = data.get(“emotion”, “neutral”).strip().lower()
+                if emotion not in valid_emotions:
+                    emotion = “neutral”
+                return reply, emotion
+            except Exception:
+                pass
+        return raw, “neutral”
+```
+
+**工具调用（ReAct）路径**：`execute_tools_and_build_final_prompt` 的二次 LLM 调用（`caller=”tool_feedback”`）也需要同样的结构化输出改造。该函数的 `second_prompt` 末尾同步更新，解析逻辑复用 `parse_structured_reply`。
+
+#### 后台：情绪 Agent（BackgroundTasks）
+
+新增文件 `backend/services/mood_agent.py`，实现 `MoodAgent` 类：
+
+```python
+class MoodAgent:
+    TRIGGER_INTERVAL = 5  # 每 5 轮对话触发一次
+
+    async def should_trigger(self, session_id: str, total_chats: int) -> bool:
+        return total_chats % self.TRIGGER_INTERVAL == 0
+
+    async def analyze_mood_tendency(self, user_id: str, session_id: str) -> None:
+        “””
+        读取最近 15 条用户消息，输出情绪倾向文本，写入 user_profiles.mood_tendency。
+        “””
+```
+
+**Prompt 设计**：
+
+```
+以下是用户最近的发言（按时间顺序）：
+{最近 15 条 role=user 的消息内容}
+
+请用 20 字以内描述这位用户近期的情绪倾向（如”最近持续焦虑，偶尔开心”）。
+直接输出描述文字，不要任何解释。
+```
+
+**触发逻辑**（`chat.py` 的 `chat` 函数末尾）：
+
+```python
+from fastapi import BackgroundTasks
+
+# chat 函数签名追加 background_tasks 参数
+async def chat(request: Request, session_id: str, chat_req: ChatRequest, background_tasks: BackgroundTasks):
     ...
+    # 在 return ChatResponse 之前注册后台任务
+    if await mood_agent.should_trigger(session_id, new_total_chats):
+        background_tasks.add_task(
+            mood_agent.analyze_mood_tendency,
+            user_id=session_dict[“user_id”],
+            session_id=session_id
+        )
 ```
 
-调用链路：
-- `sessions.py` 创建会话时调用 `generate_welcome_messages()` → 取 `welcomes[0]`
-- `custom_pets.py` 预览时也调用同一函数
+#### user_profile_agent 的 mood_tendency 字段处理
 
-### 实现方案
+`user_profile_agent.analyze_and_extract` 的 Prompt 目前包含 `mood_tendency` 字段，导致它也在每轮更新这个字段，与新的专职 Agent 产生竞争写入。
 
-1. **`backend/services/llm_service.py`**：扩展 `generate_welcome_message()` 支持自定义宠物参数
-   - 新增参数：`pet_type`（动物种类）、`personality_tags`（性格标签列表）、`catchphrase`（口头禅）
-   - 构建 Prompt：`"你是{pet_name}，一只{pet_type_display}，性格{tags}。请用你的风格写一句简短的欢迎主人的话（30字以内）。"`
-   
-2. **`backend/prompts/custom_pet.py`**：将 `generate_welcome_messages()` 改为调用 LLM
-   - 保留函数签名兼容性，内部改为调用 `llm_service.generate_welcome_message()`
-   - 或直接废弃该函数，让调用方直接使用 LLM 服务
+处理方案：**从 `user_profile_agent` 的 Prompt 中移除 `mood_tendency` 字段**，该字段的更新权交给 `MoodAgent` 独占。`memory_service.merge_user_profile` 的合并逻辑本身是字段级 UPSERT，两个 Agent 写不同字段不会冲突，只需从 `user_profile_agent` 的 Prompt 和 JSON schema 中删去该字段即可。
 
-3. **`backend/routers/sessions.py`**（第 121-127 行）：将 `generate_welcome_messages()` 调用替换为 LLM 生成
-   
-4. **`backend/routers/custom_pets.py`**（第 149-154 行）：预览接口同步改为 LLM 生成
+#### ChatResponse 字段
 
-### 边界情况
+`ChatResponse.emotion_tag` 字段保留不变，来源从 `llm_service.extract_emotion` 的返回值改为 `parse_structured_reply` 的第二个返回值。前端零改动。
 
-- **LLM 不可用时降级**：保留现有硬编码模板作为 fallback
-- **生成失败重试**：最多重试 1 次
-- **超时控制**：欢迎语生成设置较短的 max_tokens（50），避免阻塞会话创建
-- **宠物类型映射**：将 `pet_type`（如 `hamster`、`fox`）映射为中文显示名传给 LLM
+#### 数据流图
+
+```
+用户消息
+   │
+   ▼
+主 LLM 调用（caller=”main_chat”）
+   │  full_prompt 末尾要求 JSON 输出
+   │  {reply: “...”, emotion: “sad”}
+   ▼
+parse_structured_reply()
+   ├─ reply_text  → execute_tools_and_build_final_prompt → 最终回复
+   └─ emotion_tag → calculate_intimacy_change → 亲密度计算
+                  → save_message(emotion_tag=...) → messages 表
+                  → ChatResponse.emotion_tag → 前端
+
+(每 5 轮，response 返回后异步)
+   ▼
+MoodAgent.analyze_mood_tendency()
+   │  读取最近 15 条用户消息
+   │  轻量 LLM 调用（caller=”mood_agent”）
+   └─ 写入 user_profiles.mood_tendency
+```
+
+### Implementation Tasks
+
+1. **`backend/routers/chat.py`（核心改造）**
+   1. 新增辅助函数 `parse_structured_reply(raw: str) -> tuple[str, str]`（含 JSON 解析 + 正则兜底）
+   2. 修改 `full_prompt` 末尾指令：将”直接输出回复内容”替换为 JSON 格式要求
+   3. 修改主 LLM 调用后的处理逻辑：
+      - `raw_reply = await llm_service.chat(..., caller=”main_chat”)`
+      - `reply, emotion_tag = parse_structured_reply(raw_reply or fallback_text)`（注意 fallback 分支）
+   4. 删除 `emotion_tag = await llm_service.extract_emotion(...)` 这一行（第 565 行）
+   5. 修改 `execute_tools_and_build_final_prompt`：
+      - `second_prompt` 末尾同步改为 JSON 格式要求
+      - 函数返回值从 `(str, dict)` 改为 `(str, str, dict)`，增加 `emotion_tag` 返回
+      - 或在调用处对二次 LLM 结果再次调用 `parse_structured_reply`（推荐，避免修改函数签名）
+   6. 在函数签名加入 `background_tasks: BackgroundTasks`，并在 `return ChatResponse` 前注册后台任务
+   7. 在文件顶部 import `BackgroundTasks` 和 `mood_agent`
+
+2. **新增 `backend/services/mood_agent.py`**
+   - 实现 `MoodAgent` 类，含 `should_trigger` 和 `analyze_mood_tendency` 方法
+   - `analyze_mood_tendency` 内：读取 session 最近 15 条 `role=user` 消息 → 构建 Prompt → 调用轻量 LLM → 写入 `user_profiles.mood_tendency`（通过 `memory_service.merge_user_profile`）
+   - 导出全局单例 `mood_agent`
+
+3. **`backend/services/user_profile_agent.py`**
+   - 从 `PROFILE_EXTRACT_PROMPT` 的说明列表中删除第 7 条”情绪倾向”
+   - 从 JSON schema 示例中删除 `”mood_tendency”` 字段
+   - 从 `has_data` 检查逻辑中无需改动（字段消失后自然不会产生该字段的值）
+
+4. **`backend/services/llm_service.py`**
+   - `extract_emotion` 方法可保留（供其他潜在调用方使用），但在 `chat.py` 中不再调用它
+   - 无需新增结构化输出模式，`_call_llm` 不变
+
+5. **`backend/schemas.py`**
+   - `ChatResponse` 不变（`emotion_tag: str` 字段保留）
+
+6. **`docs/update.md`**
+   - 按项目规范记录本次更新内容
+
+### Risks and Mitigations
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|---------|
+| 主 LLM 不遵循 JSON 格式，返回纯文本 | emotion 降级为 neutral，reply 内容仍可正常展示 | `parse_structured_reply` 的双重兜底（直接解析 + 正则提取）已覆盖大多数情况 |
+| 主 LLM 将 reply 字段内容截断或编码 JSON 特殊字符 | 回复内容缺失或乱码 | 解析失败时直接用 `raw` 原文作为 reply，不丢弃用户体验 |
+| 工具调用路径（ReAct）的二次 LLM 也改了格式 | 工具结果回复丢失 | `execute_tools_and_build_final_prompt` 的 `second_prompt` 同步改造，复用 `parse_structured_reply`，emotion 忽略（工具轮次不更新 emotion） |
+| `mood_agent` 写入 `mood_tendency` 与 `user_profile_agent` 竞争 | 字段互相覆盖 | 从 `user_profile_agent` Prompt 中删除该字段，`merge_user_profile` 的 field-level 合并逻辑天然隔离 |
+| 后台 mood_agent 调用 LLM 失败 | 不影响响应；该轮 `mood_tendency` 不更新 | `analyze_mood_tendency` 内 try/except 全局兜底，失败只记日志 |
+| 每隔 5 轮的触发条件基于 `new_total_chats` 的模运算，多 session 场景下可能同时触发多个后台任务 | LLM 并发消耗增加 | 轻量模型 + 每任务独立超时，可接受；后续可加分布式限流 |
+
+### Testing Strategy
+
+- **单元测试 `parse_structured_reply`**：
+  - 输入合法 JSON：断言 reply 和 emotion 正确提取
+  - 输入 JSON 前后带冗余文字：断言正则提取仍成功
+  - 输入纯文本（LLM 拒绝 JSON 格式）：断言返回 `(raw, “neutral”)`
+  - 输入 emotion 为非法值（如 `”angry”`）：断言 emotion 降级为 `”neutral”`
+- **集成测试（chat 端点）**：
+  - Mock `llm_service.chat` 返回合法 JSON → 断言 `ChatResponse.emotion_tag` 非 neutral（如 `sad`）
+  - Mock `llm_service.chat` 返回纯文本 → 断言请求仍成功，`emotion_tag == “neutral”`
+  - 验证 `llm_service.extract_emotion` 不再被调用（Mock 断言 call_count == 0）
+- **后台任务测试**：
+  - 触发第 5 轮对话后检查 `user_profiles.mood_tendency` 是否被写入
+  - Mock `mood_agent.analyze_mood_tendency` 抛异常 → 断言 `ChatResponse` 仍正常返回
+- **回归测试**：
+  - 日程标记 `[SCHEDULE:...]` 在 reply 字段内仍被正确解析提取
+  - 工具调用标记 `[TOOL_CALL]...[/TOOL_CALL]` 在 reply 字段内仍被正确执行
+  - 亲密度计算：`emotion_tag == “sad”` 时 `intimacy_change == 3`，其余为 1
 
 ---
 
-## ✅ 已实现：自定义宠物删除功能
-
-### 问题
-
-用户创建了自定义宠物后，在首页 `index.html` 的宠物列表中无法删除不需要的自定义宠物。当前后端虽然已有 `DELETE /api/custom-pets/detail/{pet_id}` 接口，但：
-1. 前端缺少删除按钮和交互流程
-2. 后端删除接口未校验用户归属（`user_id` 硬编码为 `default_user` 但未在查询中体现）
-3. 删除宠物时未清理关联数据（`pet_sessions`、`messages`、`long_term_memories`、`schedules`、`memory_vectors`），会产生孤儿数据
-
-### 当前架构
-
-**数据库关系链（删除时需要级联清理）**：
-```
-custom_pets (pet_id)
-  └── pet_sessions (custom_pet_id)  ← 通过 custom_pet_id 关联
-        ├── messages (session_id)
-        ├── long_term_memories (session_id)
-        ├── schedules (session_id)
-        └── memory_vectors (session_id)
-```
-
-- **注意**：数据库表定义中这些外键没有 `ON DELETE CASCADE`，需要应用层手动清理。
-- 预置宠物（`hot_dog`、`cold_cat`、`mouse`）不存储在 `custom_pets` 表中，天然无法被误删。
-
-**后端**：`backend/routers/custom_pets.py:340-356`
-```python
-@router.delete("/detail/{pet_id}")
-async def delete_custom_pet(pet_id: str):
-    async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT pet_id FROM custom_pets WHERE pet_id = ?", (pet_id,)
-        )
-        if not await cursor.fetchone():
-            raise HTTPException(status_code=404, detail="宠物不存在")
-        await db.execute("DELETE FROM custom_pets WHERE pet_id = ?", (pet_id,))
-        await db.commit()
-    return {"message": "删除成功"}
-```
-问题：
-- 仅查询 `custom_pets` 表（预置宠物不在其中），不会误删预置宠物 —— 但缺少显式的 `pet_id.startswith("custom_")` 防护
-- 未按 `user_id` 过滤，任何用户可删除任意自定义宠物
-- 删除宠物后，关联的 sessions / messages / vectors 等成为孤儿数据
-
-**前端**：`frontend/index.html` 的 `loadCustomPets()` 函数（178-237行）
-- 为每个自定义宠物动态创建 `.pet-card.custom-pet-user` 卡片
-- 卡片只有「选择」按钮，无「删除」按钮
-
-**API 客户端**：`frontend/js/api.js`
-- 有 `listCustomPets()` 和 `createCustomPet()`，无 `deleteCustomPet()`
-
-### 实现方案
-
-#### 后端改造（`backend/routers/custom_pets.py`）
-
-重写 `delete_custom_pet` 函数，执行以下步骤（在一个事务中）：
-
-1. **安全校验**：
-   - 校验 `pet_id` 必须以 `custom_` 开头（防止恶意传入预置宠物名如 `hot_dog`）
-   - 按 `user_id` 查询宠物，确保只能删除自己的宠物（当前 `user_id` 硬编码为 `"default_user"`，与项目现有模式保持一致）
-
-2. **查找关联会话**：
-   - 查询 `pet_sessions` 表中所有 `custom_pet_id = pet_id` 的 `session_id` 列表
-
-3. **级联清理关联数据**（按外键依赖顺序）：
-   - 删除 `messages` 表中属于这些 session 的记录
-   - 删除 `long_term_memories` 表中属于这些 session 的记录
-   - 删除 `schedules` 表中属于这些 session 的记录
-   - 删除 `memory_vectors` 表中属于这些 session 的记录
-   - 删除 `pet_sessions` 表中这些 session 的记录
-
-4. **删除宠物记录**：
-   - 删除 `custom_pets` 表中的宠物行
-
-5. **提交事务**：`await db.commit()`
-
-#### 前端改造
-
-**`frontend/js/api.js`**：
-- 新增 `deleteCustomPet(petId)` 函数，调用 `DELETE /api/custom-pets/detail/{petId}`
-
-**`frontend/index.html`**：
-- 在 `loadCustomPets()` 中，为每个自定义宠物卡片追加一个删除按钮（样式为红色/警告色小按钮，放在卡片底部或右上角）
-- 点击删除时弹出确认对话框（`confirm('确定要删除宠物「XXX」吗？此操作不可撤销，所有聊天记录将被清除。')`）
-- 确认后调用 `API.deleteCustomPet(petId)`，成功则从 DOM 中移除该卡片
-- 如果删除后自定义宠物列表为空，显示空状态提示
-- 删除按钮在请求期间显示 loading 状态（禁用 + 文字变为「删除中...」）
-
-**CSS 样式**（`frontend/index.html` 内联 `<style>`）：
-- `.delete-pet-btn`：红色小按钮，位于卡片右上角或选择按钮下方
-- hover 时加深颜色
-
-### 边界情况
-
-- **预置宠物防护**：前端硬编码的 3 张预置宠物卡片没有删除按钮；后端双重校验 `pet_id.startswith("custom_")`
-- **宠物不存在**：返回 404，前端提示用户
-- **并发删除**：两个标签页同时删除同一宠物，第二次请求返回 404，前端静默处理或提示「宠物已被删除」
-- **有关联会话但无消息**：即使该宠物从未被聊过天（无 messages），仍需清理 `pet_sessions` 表
-- **删除当前正在使用的宠物**：如果用户正在 `chat.html` 中与该宠物对话，删除后回到首页再选择同一宠物会因 session 已被清除而重新创建新 session（这是预期行为）
-- **网络错误**：前端 catch 错误，提示用户「删除失败，请重试」
-- **空状态恢复**：删除全部自定义宠物后，需重新显示「还没有创建自定义宠物」提示（当前代码在卡片被移除后不会自动恢复，需要在删除完成后检查）
-
-### 修改文件
-
-- `backend/routers/custom_pets.py`：重写 `delete_custom_pet` 函数，增加安全校验 + 级联清理
-- `frontend/js/api.js`：新增 `deleteCustomPet(petId)` 方法
-- `frontend/index.html`：在 `loadCustomPets()` 中为每张自定义宠物卡片添加删除按钮 + 确认交互 + DOM 清理逻辑 + 空状态恢复
+已实现需求：宠物陪你学 GitHub 开源项目教学功能。

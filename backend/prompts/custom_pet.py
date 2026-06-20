@@ -322,8 +322,13 @@ def generate_custom_pet_system_prompt(
     Returns:
         完整的 System Prompt
     """
+    # 过滤用户输入字段，防止 prompt 注入
+    pet_name = _sanitize_user_input(pet_name)
+    if catchphrase:
+        catchphrase = _sanitize_user_input(catchphrase)
+
     self_name = PET_SELF_NAMES.get(pet_type, "我")
-    
+
     # 如果没有提供口头禅，根据性格生成默认
     if not catchphrase:
         if "热情" in personality_tags or "活泼" in personality_tags:
