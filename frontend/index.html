@@ -166,7 +166,7 @@
                                 <span>${personalityStr || '自由设定'}</span>
                             </div>
                             <div class="btn-group">
-                                <button class="select-btn" onclick='selectCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl})'>进入 ${pet.pet_name} 的会话</button>
+                                <button class="select-btn" onclick='selectCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl}, ${JSON.stringify(pet.pet_type)})'>进入 ${pet.pet_name} 的会话</button>
                                 <button class="delete-pet-btn" onclick='deletePet(event, ${safePetId}, ${safePetName})'>删除这个宠物</button>
                             </div>
                             <button class="learn-entry-btn" onclick='learnWithCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl}, ${JSON.stringify(pet.pet_type)})'>📚 陪我学</button>
@@ -198,7 +198,7 @@
             }
         }
 
-        async function selectCustomPet(petId, petName, avatarUrl) {
+        async function selectCustomPet(petId, petName, avatarUrl, rawPetType) {
             const loading = document.getElementById('loading');
             loading.style.display = 'flex';
 
@@ -211,6 +211,9 @@
                 localStorage.setItem('qagent_custom_pet_name', petName);
                 localStorage.setItem('qagent_welcome', JSON.stringify(response.welcome_message || {}));
                 localStorage.setItem('qagent_intimacy', response.intimacy);
+                if (rawPetType) {
+                    localStorage.setItem('qagent_custom_pet', JSON.stringify({ pet_type: rawPetType }));
+                }
 
                 if (avatarUrl) {
                     localStorage.setItem('qagent_custom_avatar', avatarUrl);

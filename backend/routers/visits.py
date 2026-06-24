@@ -19,10 +19,16 @@ UUID_PATTERN = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
     re.IGNORECASE
 )
+CUSTOM_PET_ID_PATTERN = re.compile(r'^custom_[0-9a-f]{8}$', re.IGNORECASE)
 
 
 def _validate_uuid(value: str, field_name: str = "id") -> None:
     if not value or not UUID_PATTERN.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
+
+
+def _validate_pet_id(value: str, field_name: str = "id") -> None:
+    if not value or (not UUID_PATTERN.match(value) and not CUSTOM_PET_ID_PATTERN.match(value)):
         raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
 
 
@@ -68,7 +74,7 @@ async def start_visit(body: StartVisitRequest, request: Request):
     # VIS-1: 非预置宠物必须属于当前用户
     is_preset_guest = body.guest_pet_id in ("hot_dog", "cold_cat", "mouse")
     if not is_preset_guest:
-        _validate_uuid(body.guest_pet_id, "guest_pet_id")
+        _validate_pet_id(body.guest_pet_id, "guest_pet_id")
         async with get_db() as db:
             cursor = await db.execute(
                 "SELECT pet_id FROM custom_pets WHERE pet_id = ? AND user_id = ?",

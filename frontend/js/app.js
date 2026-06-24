@@ -735,13 +735,15 @@ class ChatApp {
         const interjectionInput = document.getElementById('visit-interjection-input');
 
         nextBtn.disabled = true;
-        endBtn.disabled = true;
         this.visitIsLoading = true;
+        this._visitAborted = false;
+
+        endBtn.onclick = () => { this._visitAborted = true; this.endVisit(); };
 
         let guestTurn = true;
 
         for (let i = 0; i < maxTurns; i++) {
-            if (!this.currentVisitId) break;
+            if (!this.currentVisitId || this._visitAborted) break;
 
             const interjection = (i === 0 && interjectionInput.value.trim()) ? interjectionInput.value.trim() : '';
             if (i === 0) interjectionInput.value = '';
@@ -775,8 +777,9 @@ class ChatApp {
 
         loadingEl.style.display = 'none';
         this.visitIsLoading = false;
+        this._visitAborted = false;
         nextBtn.disabled = false;
-        endBtn.disabled = false;
+        this.bindVisitControls();
     }
 
     async endVisit() {

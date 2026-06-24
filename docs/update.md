@@ -2,6 +2,29 @@
 
 ---
 
+## 2026-06-22（Bug 修复：串门功能与自定义宠物头像）
+
+### 串门功能三处修复
+
+**1. 结束按钮在自动轮次期间被禁用（`frontend/js/app.js`）：**
+- `runAutoVisitTurns` 原来把 `endBtn.disabled = true`，6 轮全部跑完才解禁，用户无法中途结束
+- 改为保留 endBtn 可点击状态，改用 `_visitAborted` 中断标志，点击结束按钮立即终止循环并结束串门
+
+**2. LLM token budget 耗尽导致串门消息为空（`backend/services/cross_pet_service.py`）：**
+- 模型 `MiniMax-M2.7` 为推理模型，会先生成 thinking 块，`max_tokens=200`（visit_turn）和 `max_tokens=300`（visit_summary）远不够用，thinking 消耗全部 token 后无文本输出
+- 将两处 `max_tokens` 均提升至 1024
+
+**3. 自定义宠物 ID 格式不匹配 UUID 校验（`backend/routers/visits.py`）：**
+- 自定义宠物 ID 格式为 `custom_XXXXXXXX`，而 `start_visit` 对非预置 guest 调用了 `_validate_uuid()`，UUID 正则无法匹配该格式，直接返回 400
+- 新增 `_validate_pet_id()` 函数，同时接受标准 UUID 和 `custom_XXXXXXXX` 格式
+
+### 自定义宠物头像显示 emoji 而非图片（`frontend/index.html`）
+
+- `selectCustomPet` 函数未存储 `qagent_custom_pet`（含 `pet_type`），导致 `app.js` 中 `rawPetType` 为空，`getPetPresetImage` 找不到对应图片，fallback 到 emoji
+- `selectCustomPet` 新增 `rawPetType` 参数，进入会话时同步写入 `qagent_custom_pet`；对应 onclick 调用处同步传入 `pet.pet_type`
+
+---
+
 ## 2026-06-20（安全修复：陪你学功能漏洞审查与修复）
 
 调用 bug 检查 agent 对 `docs/plan.md` 中「情绪感知两层架构」与「宠物陪你学」两需求的实现做安全审查，新增漏洞记录于 `docs/bug.md` 的「陪你学功能（learning）新增漏洞追踪」章节（3 High + 3 Medium + 3 Low），并完成以下修复：
