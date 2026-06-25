@@ -2,6 +2,29 @@
 
 ---
 
+## 2026-06-25（Bug 修复：LLM API 调用错误）
+
+### 问题分析
+通过日志发现三处 LLM 调用错误：
+
+1. **`main_chat` ReadTimeout** — `chat.py:565`，MiniMax-M2.7 扩展思考模型处理完整 prompt 超过 30s 默认超时，导致主对话返回 fallback 文本。
+2. **`user_profile_agent` ReadTimeout** — `user_profile_agent.py:57`，用户画像提取 30s 超时，且该调用在聊天主流程中同步 `await`，直接阻塞响应。
+3. **`mood_agent` No text block** — `mood_agent.py:74`，`max_tokens=200` 过小，思考 token 消耗完毕后无剩余 token 输出文本。
+
+### 修复内容
+
+**`backend/routers/chat.py`：**
+- `main_chat` 超时从默认 30s 改为 90s
+- `user_profile_agent` 调用从同步阻塞改为 `background_tasks.add_task`，不再阻塞聊天响应
+
+**`backend/services/mood_agent.py`：**
+- `max_tokens` 从 200 改为 800，确保 extended thinking 模型思考后仍有 token 输出文本
+
+**`backend/services/user_profile_agent.py`：**
+- `_call_llm` 增加 `timeout=90.0` 参数
+
+---
+
 ## 2026-06-22（Bug 修复：串门功能与自定义宠物头像）
 
 ### 串门功能三处修复

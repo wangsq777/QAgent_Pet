@@ -59,7 +59,8 @@ class UserProfileAgent:
             llm_service.model,
             temperature=0.3,
             max_tokens=2000,
-            caller="user_profile_agent"
+            caller="user_profile_agent",
+            timeout=90.0
         )
         
         logger.debug("LLM result: %s", result)

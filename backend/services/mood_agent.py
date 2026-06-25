@@ -70,7 +70,7 @@ class MoodAgent:
             result = await llm_service.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=200,
+                max_tokens=800,
                 caller="mood_agent"
             )
 

@@ -562,7 +562,7 @@ Agent 需要自主从用户消息中识别位置信息：
 {{"reply": "你的回复内容", "emotion": "用户情绪标签(happy/sad/anxious/tired/neutral)"}}
 其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。"""
 
-    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")
+    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", timeout=90.0)
     if not raw_reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
@@ -608,21 +608,21 @@ Agent 需要自主从用户消息中识别位置信息：
             await db.commit()
         logger.info("Schedule saved: %s", schedule_extracted)
 
-    # 后台更新用户画像（使用用户画像总结 Agent）
+    # 后台更新用户画像（使用用户画像总结 Agent，不阻塞响应）
     user_profile_updated = False
-    try:
-        conversation_for_profile = recent_conversation
-        existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
-        extracted_profile = await user_profile_agent.analyze_and_extract(
-            conversation_for_profile, 
-            existing_profile
-        )
-        if extracted_profile:
-            await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
-            user_profile_updated = True
-            logger.debug("User profile updated by agent: %s", extracted_profile)
-    except Exception as e:
-        logger.warning("User profile agent error: %s", e)
+    async def _update_user_profile():
+        try:
+            existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
+            extracted_profile = await user_profile_agent.analyze_and_extract(
+                recent_conversation,
+                existing_profile
+            )
+            if extracted_profile:
+                await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
+                logger.debug("User profile updated by agent: %s", extracted_profile)
+        except Exception as e:
+            logger.warning("User profile agent error: %s", e)
+    background_tasks.add_task(_update_user_profile)
 
     assistant_msg_id = await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
 
