@@ -2,6 +2,50 @@
 
 ---
 
+## 2026-07-01（优化：压制 MiniMax-M2.7 thinking 块，给 text 回复留足预算）
+
+**背景：** 修复 token budget 后 LLM 仍偶发"只有 thinking 没有 text"。用户希望只要 text 块、不要 thinking 块。经实测排查定论。
+
+**实测结论（对 MiniMax-M2.7 / `https://api.minimaxi.com/anthropic/v1/messages` Anthropic 兼容端点）：**
+- thinking 块是模型内置行为，**无法用任何请求参数完全关闭**。所有被接受的参数下 `content` 始终为 `['thinking','text']`。
+- 各参数实测 thinking 块长度：`chat_template_kwargs.enable_thinking=False` ≈44（最短）｜`reasoning_effort=none` ≈90｜baseline ≈98｜`reasoning_effort=low` ≈1166（反常最长）｜Anthropic 标准 `thinking:false` → 400 invalid params。
+- 代码本身早就在丢弃 thinking 块（`llm_service.py` 只取 `type=="text"`），"输出层不要 thinking"早已满足；真正问题是 thinking 吃光 `max_tokens` 导致 text 来不及产出。
+
+**改动（A+B 叠加）：**
+- A（前次已改）：`main_chat`/`tool_feedback` 显式 `max_tokens=2000`。
+- B（本次）：`llm_service.py` `_call_llm` 在 payload 增加 `chat_template_kwargs={"enable_thinking": False}`（仅当 model 含 `MiniMax-M2` 时），把思考压到最短，给 text 留更多预算、降延迟降成本。
+
+**验证：** 重启服务启动正常，待前端重发消息观察是否仍出现 `No text block found`。
+
+---
+
+## 2026-07-01（修复：MiniMax-M2.5 thinking 耗尽 token budget 导致 LLM 返回空、走兜底回复）
+
+**问题：** 修复 SQL 占位符后聊天接口返回 200，但日志反复出现 `[main_chat] No text block found in content (token budget likely exhausted)` 与 `[proactive_hot_dog] ...`，用户实际看到的是兜底文案而非真实 LLM 回复，"没调用成功"。
+
+**根因：** 模型为 `MiniMax-M2.5`（带 extended thinking）。该模型在 `content` 列表里先放 thinking 块、再放 text 块。当 `max_tokens` 偏小（`main_chat`/`tool_feedback` 用默认 500），整段预算被 thinking 吃光，text 块来不及产出即触顶，`stop_reason=max_tokens`，`content` 里只有 thinking、没有 text → `_call_llm` 遍历找不到 `type=="text"` 块 → 返回 None → 路由走 `fallback_replies` 兜底。
+
+**修复：**
+- `backend/routers/chat.py:700` `main_chat` 调用显式传 `max_tokens=2000`（原走默认 500）。
+- `backend/routers/chat.py:457` `tool_feedback` 同样传 `max_tokens=2000`（原走默认 500，同类长 prompt 同样风险）。
+- `backend/services/llm_service.py` `_call_llm` 在「找不到 text 块」告警时补打 `stop_reason` 与 `usage`，便于后续快速判定是 budget 耗尽还是其他结构异常。
+
+**验证：** 重启服务，待前端重发消息后观察日志是否仍出现 `No text block found`。
+
+---
+
+## 2026-07-01（修复：messages 表 INSERT 占位符缺失导致聊天 500）
+
+**问题：** 前端发送聊天消息时 `POST /api/sessions/{id}/chat` 返回 500 Internal Server Error，后台报 `sqlite3.OperationalError: 9 values for 10 columns`。
+
+**根因：** `backend/services/memory_service.py` 的 `save_message` 中，`INSERT INTO messages` 列出 10 个列（`message_id, session_id, role, content, emotion_tag, is_proactive, emotional_need, emotion_intensity, risk_level, created_at`），但 `VALUES` 子句只写了 9 个占位符 `?`（少了 1 个），传入 10 个参数与占位符数不匹配。Phase 0 情感捕捉新增的 `emotional_need/emotion_intensity/risk_level` 三列由 `database.py` 的 ALTER TABLE 迁移正常添加，列存在，问题纯粹是占位符少写。
+
+**修复：** 在 VALUES 中补齐为 10 个占位符 `?, ?, ?, ?, ?, ?, ?, ?, ?, ?`。
+
+**验证：** 重启 `main.py`，数据库初始化正常，Uvicorn 监听 `http://0.0.0.0:8080` 正常启动。
+
+---
+
 ## 2026-07-01（功能：Phase 0 情感捕捉细化落地）
 
 实现 `docs/plan.md` 中 `[2026-06-30] Plan for 情感捕捉细化` 与 `[2026-07-01] 产品转型阶段化落地` 的 Phase 0，将主 LLM 结构化输出从两字段升级为五字段，新增情感需求/强度/风险维度，并接入亲密度计算、安全回应与记忆压缩。

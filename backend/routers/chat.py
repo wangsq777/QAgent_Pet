@@ -454,7 +454,7 @@ async def execute_tools_and_build_final_prompt(
 {{"reply": "你的回复内容", "emotion": "用户情绪(happy/sad/anxious/tired/neutral)", "need": "情感需求(companionship/venting/validation/encouragement/advice/calming/distraction/celebration/reflection/crisis_support/unknown)", "intensity": 1, "risk_level": "none"}}
 字段为系统内部判断，【不要】在 reply 里告诉用户"你现在是某某情绪"。risk_level=high 时回复必须认真严肃、不开玩笑、引导现实求助。"""
 
-    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback")
+    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback", max_tokens=2000)
 
     # 如果 LLM 生成回复成功，返回结果（并清理可能的 TOOL_CALL 标记）
     if raw_final:
@@ -697,7 +697,7 @@ Agent 需要自主从用户消息中识别位置信息：
 - risk_level：安全风险等级 none/low/medium/high。当用户表达自伤、自杀、伤害他人、极度绝望时取 high。
 【安全】当 risk_level=high 时，回复必须认真严肃，不开玩笑、不轻描淡写，鼓励用户联系现实中可信任的人或紧急求助，并说明本产品不是专业心理咨询。"""
 
-    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", timeout=90.0)
+    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", max_tokens=2000, timeout=90.0)
     if not raw_reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",

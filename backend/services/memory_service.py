@@ -63,7 +63,7 @@ class MemoryService:
                 """
                 INSERT INTO messages (message_id, session_id, role, content, emotion_tag, is_proactive,
                                       emotional_need, emotion_intensity, risk_level, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (message_id, session_id, role, content, emotion_tag, is_proactive,
                  emotional_need, emotion_intensity, risk_level, datetime.now())

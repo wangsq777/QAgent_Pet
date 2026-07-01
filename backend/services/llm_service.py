@@ -83,6 +83,13 @@ class LLMService:
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
 
+        # MiniMax-M2.7 的 thinking 是模型内置行为，无法用参数完全关闭。
+        # chat_template_kwargs.enable_thinking=False 实测能把思考块压到最短
+        # (~44 字符 vs baseline ~98 / reasoning_effort=low ~1166)，给 text 块
+        # 留出更多预算，同时降低延迟与 token 消耗。仍会保留极短 thinking 块。
+        if "MiniMax-M2" in model:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+
         logger.debug("[%s] Calling LLM...", caller)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -104,7 +111,13 @@ class LLMService:
                             content = block.get("text")
                             break
                     if content is None:
-                        logger.warning("[%s] No text block found in content (token budget likely exhausted): %s", caller, str(content_list)[:200])
+                        stop_reason = data.get("stop_reason")
+                        usage = data.get("usage")
+                        logger.warning(
+                            "[%s] No text block found in content (token budget likely exhausted) "
+                            "stop_reason=%s usage=%s blocks=%s",
+                            caller, stop_reason, usage, str(content_list)[:200]
+                        )
                 # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
                 elif "choices" in data:
                     content = data["choices"][0]["message"]["content"]
