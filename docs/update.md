@@ -2,6 +2,98 @@
 
 ---
 
+## 2026-07-01（功能：Phase 0 情感捕捉细化落地）
+
+实现 `docs/plan.md` 中 `[2026-06-30] Plan for 情感捕捉细化` 与 `[2026-07-01] 产品转型阶段化落地` 的 Phase 0，将主 LLM 结构化输出从两字段升级为五字段，新增情感需求/强度/风险维度，并接入亲密度计算、安全回应与记忆压缩。
+
+**1. 文档重构：**
+- `docs/plan.md`：将已完成的 `[2026-06-17] 情绪感知两层架构重构` 详细计划替换为一行「需求：情绪感知两层架构重构已实现。」，删除其实现路径描述，保持 plan.md 只承载待实现需求。
+
+**2. 主 LLM 结构化输出升级（`backend/routers/chat.py`）：**
+- 新增 `parse_emotional_reply(raw)` 返回 `EmotionalReply` 对象，五字段 `reply/emotion/need/intensity/risk_level`；三层兜底（直接 JSON 解析 → 正则提取最外层 JSON → 纯文本原文）；兼容旧两字段格式（缺字段走安全默认 `need=unknown/intensity=1/risk_level=none`）；非法值降级（`emotion`→neutral、`need`→unknown、`intensity` 钳到 1-5、`risk_level`→none）。
+- 保留 `parse_structured_reply()` 旧接口作为兼容垫片，内部委托 `parse_emotional_reply`。
+- `full_prompt` 与工具路径 `second_prompt` 末尾均改为要求输出五字段 JSON，并强调这些字段是系统内部判断、不得在 `reply` 里告诉用户"你现在是某某情绪"。
+- 工具路径 `execute_tools_and_build_final_prompt` 返回值从 `(str, dict, str)` 改为 `(str, dict, EmotionalReply)`；首轮与工具路径情感字段做协调覆盖（工具路径给出有意义字段才覆盖首轮）。
+
+**3. 亲密度计算改造（`backend/routers/chat.py`）：**
+- `calculate_intimacy_change(emotion, need, intensity)` 从只看 `emotion_tag` 升级为结合三维度：sad/anxious 基础分更高、陪伴/倾诉/认可/鼓励/安抚类需求加成、高强度情感加成，上限 3。
+
+**4. 高风险安全回应策略（`backend/routers/chat.py`）：**
+- 新增 `generate_safe_crisis_reply(pet_type, pet_name)`：`risk_level=high` 时在安全规则约束下重新生成回复，保持宠物人格但优先安全、不开玩笑、引导联系现实可信任的人/紧急求助、声明本产品非专业心理咨询；LLM 失败时返回固定安全模板。
+- chat 主流程在解析出 `risk_level=high` 后调用该函数覆盖回复，并将 `need` 标记为 `crisis_support`。
+
+**5. MoodAgent 结构化趋势升级（`backend/services/mood_agent.py`）：**
+- `analyze_mood_tendency` 从输出 20 字简单倾向升级为结构化 JSON：`mood_tendency/dominant_emotion/dominant_need/suggested_support_style`。
+- `mood_tendency` 仍写入 `user_profiles`（schema 唯一支持字段），其余字段记录到日志供后续主动关怀策略扩展。
+- 解析失败时退回旧版纯文本兜底，异常仍不影响主响应路径。
+
+**6. messages 表情感字段落库（`backend/database.py` + `backend/services/memory_service.py`）：**
+- `messages` 表新增 `emotional_need TEXT`、`emotion_intensity INTEGER`、`risk_level TEXT` 三列，采用与 `user_profiles` 相同的 `ALTER TABLE` + 忽略 "duplicate column name" 的兼容迁移范式（幂等）。
+- `memory_service.save_message` 签名扩展新增三参数，INSERT 同步落库；chat 主流程在保存 assistant 消息时传入本轮情感字段。
+
+**7. 记忆压缩保留情感事件（`backend/services/llm_service.py`）：**
+- `compress_memory` Prompt 增加要求：保留用户重要情绪事件、情感支持偏好、压力来源与有效安抚方式；情感类记忆 `importance` 适当提高，降低被时间衰减影响的速度。
+
+**验证结果：**
+- ✅ `python -m py_compile` 全量文件语法检查通过（chat/mood_agent/memory_service/llm_service/database）
+- ✅ `import main` 导入无误
+- ✅ `parse_emotional_reply` 单测覆盖：新格式完整提取、旧两字段兼容、JSON 前后带冗余文字正则提取、纯文本 fallback、非法 emotion/need/intensity/risk 降级、空/None 兜底
+- ✅ `calculate_intimacy_change` 单测覆盖：sad+venting+4→3、neutral+unknown+1→1、happy+celebration+2→1、anxious+calming+5→3
+- ✅ 数据库迁移幂等：临时库与真实库均成功新增三列，重复执行不报错
+- ✅ 前端零改动（`ChatResponse` 不变，新字段仅内部落库不暴露给前端）
+
+---
+
+## 2026-07-01（文档：产品转型阶段化落地计划）
+
+根据产品转型方向文档与当前需求计划，在 `docs/plan.md` 中新增 `[2026-07-01] Plan for 产品转型阶段化落地`。
+
+本次仅更新规划文档，未修改业务代码。
+
+**规划重点：**
+- 将产品主线明确为「个人 AI 电子宠物伴侣」，现有 FastAPI 后端作为统一的 `QAgent Pet Core`
+- 明确 Web 端继续作为完整功能中心，桌宠端作为下一阶段重点入口，QQ/IM 降级为远期可选扩展
+- 梳理总体路线：Phase 0 情感捕捉细化 → Phase 1 产品定位调整与 Web 宠物化 → Phase 2 桌宠 MVP → Phase 3 桌宠体验增强与养成体系 → Phase 4 多端扩展
+- 为每个阶段补充目标、交付物、涉及模块和验收标准
+- 明确阶段依赖、优先级、关键风险与缓解措施
+- 提出实施建议：先落地情感结构化，桌宠不重写后端，MVP 不过早引入 Live2D，数据迁移放到桌宠稳定后推进
+
+---
+
+## 2026-06-30（文档：产品转型方向）
+
+根据当前产品方向讨论，新增 `docs/产品转型方向文档.md`，用于记录 QAgent Pet 从「QQ 内部聊天宠物」拓展为「个人 AI 电子宠物伴侣」的转型方向。
+
+本次仅新增规划文档，未修改业务代码。
+
+**文档重点：**
+- 明确当前仅围绕 QQ Bot 推进会限制现有 Web 端能力展示，且与豆包等通用 AI 助手差异化不足
+- 将产品主线调整为「个人 AI 电子宠物伴侣」，QQ / IM 接入降级为远期可选入口
+- 保留现有 Web 端作为完整功能中心，承载宠物选择、自定义宠物、完整聊天、记忆面板、陪我学、串门和设置管理
+- 新增桌宠端方向，定位为常驻桌面的轻量陪伴入口，负责透明置顶宠物、气泡聊天、主动提醒、动画状态和托盘菜单
+- 梳理与通用 AI 助手的差异化：从工具型 AI 转向关系型 AI 电子宠物
+- 拆解后续需求方向：桌宠基础能力、宠物状态系统、动画表现、轻养成、主动陪伴、情绪陪伴、陪学桌宠化和串门桌宠化
+- 给出阶段路线：产品定位调整 → Web 端电子宠物化 → 桌宠 MVP → 桌宠体验增强
+
+---
+
+## 2026-06-30（文档：情感捕捉细化规划）
+
+根据产品方向讨论，在 `docs/plan.md` 中新增 `[2026-06-30] Plan for 情感捕捉细化（不在前端显式展示用户心情）`。
+
+本次仅更新规划文档，未修改业务代码。
+
+**规划重点：**
+- 明确产品约束：不在前端显式展示“用户当前心情状态”，避免用户产生被贴标签或被诊断的奇怪感
+- 将情感理解定位为后端内部决策信号，用于优化宠物回复、记忆沉淀、主动关怀和亲密度计算
+- 规划将当前 `reply + emotion` 结构升级为 `reply + emotion + need + intensity + risk_level`
+- 新增情感需求维度 `need`，覆盖陪伴、倾诉、认可、鼓励、建议、安抚、转移注意力、庆祝、梳理、危机支持等场景
+- 规划基础风险等级 `risk_level`，为自伤/极端负面等高风险表达预留安全回应策略
+- 明确前端不做心情标签展示，仅可在未来考虑低干扰自然语言入口，如“想吐槽一下”“想被鼓励一下”
+- 拆解后端实施方向：结构化解析升级、Prompt 更新、可选落库字段、MoodAgent 结构化趋势、情感记忆压缩、安全策略和测试方案
+
+---
+
 ## 2026-06-25（Bug 修复：LLM API 调用错误）
 
 ### 问题分析

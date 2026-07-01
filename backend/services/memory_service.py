@@ -52,16 +52,21 @@ class MemoryService:
         role: str,
         content: str,
         emotion_tag: Optional[str] = None,
-        is_proactive: bool = False
+        is_proactive: bool = False,
+        emotional_need: Optional[str] = None,
+        emotion_intensity: Optional[int] = None,
+        risk_level: Optional[str] = None
     ) -> str:
         message_id = str(uuid.uuid4())
         async with get_db() as db:
             await db.execute(
                 """
-                INSERT INTO messages (message_id, session_id, role, content, emotion_tag, is_proactive, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (message_id, session_id, role, content, emotion_tag, is_proactive,
+                                      emotional_need, emotion_intensity, risk_level, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (message_id, session_id, role, content, emotion_tag, is_proactive, datetime.now())
+                (message_id, session_id, role, content, emotion_tag, is_proactive,
+                 emotional_need, emotion_intensity, risk_level, datetime.now())
             )
             await db.commit()
         return message_id
