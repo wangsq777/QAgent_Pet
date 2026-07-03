@@ -71,6 +71,20 @@ class MemoryPanelResponse(BaseModel):
     user_profile: dict
 
 
+class PetStatusResponse(BaseModel):
+    status: str
+    status_label: str
+    status_reason: str
+    today_interactions: int
+    companion_minutes_today: int
+    consecutive_days: int
+    intimacy: int
+    intimacy_level: str
+    total_chats: int
+    mood_tendency: Optional[str] = None
+    last_interaction_at: Optional[str] = None
+
+
 class UserProfileResponse(BaseModel):
     region: Optional[str] = None
     identity: Optional[str] = None

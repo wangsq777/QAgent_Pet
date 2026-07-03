@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>选择你的宠物伴侣 - QAgent Pet</title>
-    <link rel="stylesheet" href="css/styles.css?v=3">
+    <title>宠物广场 - QAgent Pet 桌面伙伴</title>
+    <link rel="stylesheet" href="css/shell.css?v=1">
+    <link rel="stylesheet" href="css/styles.css?v=4">
 </head>
 <body>
     <div class="container page-shell">
         <header class="welcome-header">
             <div class="welcome-text">
-                <h1>🐾 选择你的宠物伴侣</h1>
-                <p>它会记住你、陪你聊天、用独特的方式回应你。</p>
+                <h1>🐾 QAgent Pet 宠物广场</h1>
+                <p>选择一只长期陪伴你的桌面电子宠物，让它记住你、陪你聊天，也陪你学习。</p>
             </div>
             <button class="create-custom-btn" onclick="goToCustomPet()">
                 <span>✨</span>
@@ -69,7 +70,7 @@
         </div>
 
         <div class="footer">
-            <p>腾讯 AI 产品校园大赛 · QQ 智能宠物伴侣 Agent</p>
+            <p>QAgent Pet · 你的桌面电子宠物伙伴</p>
         </div>
     </div>
 
@@ -77,8 +78,11 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <script src="js/api.js?v=2"></script>
+    <script src="js/api.js?v=3"></script>
+    <script src="js/shell.js?v=1"></script>
     <script>
+        initAppShell('index');
+
         let userId = localStorage.getItem('qagent_user_id');
         if (!userId) {
             userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);

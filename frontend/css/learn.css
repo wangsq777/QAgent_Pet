@@ -56,6 +56,10 @@ body {
     gap: 16px;
 }
 
+body.app-shell-enabled .learn-container {
+    height: calc(100vh - var(--app-topbar-height, 0px));
+}
+
 /* ── 顶部栏 ── */
 .learn-topbar {
     display: flex;

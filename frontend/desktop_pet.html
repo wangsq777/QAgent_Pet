@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>桌宠预览 - QAgent Pet</title>
+    <link rel="stylesheet" href="css/shell.css?v=1">
+    <link rel="stylesheet" href="css/styles.css?v=4">
+    <link rel="stylesheet" href="css/desktop_pet.css?v=1">
+</head>
+<body>
+    <main class="desktop-preview-page">
+        <section class="preview-hero">
+            <div class="preview-copy">
+                <span class="eyebrow">Phase 2 预览 · 桌面常驻伙伴</span>
+                <h1>把 QAgent Pet 放到桌面上</h1>
+                <p>未来桌宠会以透明、无边框、置顶的小窗口常驻桌面。它不会直接暴露完整私密消息，只用 2 个字左右的气泡轻轻提醒你：它在找你、想你、等你。</p>
+                <div class="preview-actions">
+                    <a class="primary-link" href="chat.html">进入完整聊天</a>
+                    <a class="secondary-link" href="settings.html">查看桌宠设置</a>
+                </div>
+            </div>
+
+            <div class="desktop-pet-stage" aria-label="桌宠预览">
+                <div class="desktop-window-shadow"></div>
+                <div class="mini-desktop-pet">
+                    <div class="pet-bubble-mini">找你</div>
+                    <img src="images/hot_dog.png" alt="桌宠预览" class="mini-pet-img">
+                    <div class="pet-click-hint">点击后展开完整聊天面板</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="preview-grid">
+            <article class="preview-card">
+                <h2>轻气泡</h2>
+                <p>桌面气泡只显示「找你」「想你」「鼓励」这类低敏概括，完整内容进入聊天面板后再看。</p>
+            </article>
+            <article class="preview-card">
+                <h2>勿扰模式</h2>
+                <p>开启勿扰后，主动气泡保持静默；宠物仍在后台陪伴，等你主动打开。</p>
+            </article>
+            <article class="preview-card">
+                <h2>共用记忆</h2>
+                <p>桌宠和 Web 会共用同一后端会话、亲密度、记忆与陪学数据，不形成割裂人格。</p>
+            </article>
+        </section>
+    </main>
+
+    <script src="js/shell.js?v=1"></script>
+    <script>
+        initAppShell('desktop_pet');
+    </script>
+</body>
+</html>

@@ -109,6 +109,18 @@ const API = {
         return await response.json();
     },
 
+    async getPetStatus(sessionId) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/pet-status`, {
+            headers: buildHeaders()
+        });
+
+        if (!response.ok) {
+            throw new Error('获取宠物状态失败');
+        }
+
+        return await response.json();
+    },
+
     async updateUserProfile(sessionId, profileData) {
         const response = await fetch(`${API_BASE}/sessions/${sessionId}/profile`, {
             method: 'PUT',
