@@ -329,7 +329,7 @@ class ChatApp {
             });
 
             // 处理日常分享消息
-            if (response.daily_share) {
+            if (response.daily_share?.content) {
                 this.addMessage({
                     role: 'assistant',
                     content: response.daily_share.content,

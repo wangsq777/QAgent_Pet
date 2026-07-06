@@ -2,6 +2,78 @@
 
 ---
 
+## 2026-07-06（修复：daily_share 空白消息防护）
+
+**问题：** Electron 桌宠轻聊天窗口中，当后端返回的 `daily_share` 对象有 `role` 字段但 `content` 为 `undefined` 时，会渲染一条空白的 assistant 消息气泡；Web 聊天主界面也仅判断 `response.daily_share` 是否存在，缺少同类防护。
+
+**根因：** `desktop/renderer/chat.js` 的 `sendMessage` 中曾存在冗余的第三条件分支：当 `daily_share.content === undefined && daily_share.role` 成立时，调用 `appendMessage('assistant', '', 'proactive')`，将空字符串作为消息内容渲染到界面上；`frontend/js/app.js` 则在 `daily_share` 对象存在但 `content` 缺失时仍会添加主动消息。
+
+**修复：** Electron 端删除冗余的第三条件分支，仅保留 `if (result?.daily_share?.content)` 判断；Web 端同步将 `if (response.daily_share)` 改为 `if (response.daily_share?.content)`，确保只有 `content` 为真值时才渲染轻提醒消息。
+
+**改动文件：**
+- `desktop/renderer/chat.js`
+- `frontend/js/app.js`
+
+---
+
+## 2026-07-06（功能：Phase 2 Electron 桌宠 MVP）
+
+根据 `docs/plan.md` 当前优先级，落地产品转型 Phase 2 桌宠 MVP，新增本地 Electron 桌宠工程，验证桌面常驻陪伴闭环。
+
+**更新内容：**
+- 新增 `desktop/` Electron 工程，包含主进程、预加载桥接、桌宠渲染页、轻聊天渲染页、开发/打包脚本与 README。
+- 桌宠窗口支持透明、无边框、置顶、跳过任务栏和宠物图片拖拽；点击宠物或 2 字气泡可打开轻聊天窗口。
+- 轻聊天窗口通过 Electron IPC 由主进程调用现有 FastAPI 后端，完成输入、思考态、回复展示和消息历史加载。
+- 新增 2 字低敏桌面提醒气泡规则，仅基于时间段、后端宠物状态、最近互动时间和勿扰模式生成「找你」「想你」「等待」「困了」「陪学」等概括，不读取屏幕或敏感应用内容。
+- 新增托盘/右键菜单：显示桌宠、打开完整 Web 面板、切换勿扰、切换预设宠物、退出。
+- 启动时检测本地后端 `8080` / `10000` 端口；未发现时尝试在项目根目录执行 `python main.py` 自动拉起，失败时给出日志路径提示。
+- 桌宠通过 Electron `userData/config.json` 持久化 `user_id/session_id/pet_type/dnd`，并由 `preload_web.js` 注入 Web 面板 localStorage，使桌宠和 Web 共用同一后端会话与记忆。
+- 修复桌宠与轻聊天窗口启动时并发初始化会话导致后端 `users.user_id` 唯一约束冲突的问题，通过主进程串行化 `ensureSession()` 避免重复创建同一用户会话。
+- 更新 `.gitignore` 忽略桌面端依赖、构建产物和运行日志；更新 `docs/plan.md` 将 Phase 2 标记为 MVP 已实现。
+
+**验证：**
+- ✅ `node --check` 检查 `desktop/main.js`、`desktop/preload*.js`、`desktop/renderer/*.js` 通过。
+- ✅ `python -m compileall backend main.py` 通过。
+- ✅ `npm install` 成功生成桌面端依赖锁文件。
+- ✅ `npm run dist -- --dir` 成功输出未打包目录 `desktop/dist/win-unpacked`，验证 Electron 工程可构建。
+- ⚠️ `npm install` 报告依赖树存在 10 个 high severity audit 项，主要来自 Electron/electron-builder 开发依赖，MVP 暂不强制升级破坏性版本。
+
+---
+
+## 2026-07-06（文档：精简 docs 目录并同步核心文档）
+
+根据用户希望保留“需求计划文档、bug 文档、项目介绍文档”的目标，清理 `docs/` 目录中过期、重复或非项目文档，并同步更新核心文档内容。
+
+**更新内容：**
+- 重写 `docs/README.md`，将项目定位从“QQ 智能宠物伴侣”更新为“个人 AI 电子宠物伴侣”，补充当前功能、技术栈、页面/API、项目结构、演示建议、路线和安全部署注意事项。
+- 更新 `docs/plan.md`，将当前优先级从 Phase 1 调整为 Phase 2 桌宠 MVP，并修正已实现 Phase 1 后仍残留的旧实施建议。
+- 重写压缩 `docs/bug.md`，只保留仍需处理的 Open / Partial 项，将已修复 VIS / EMO / LEARN / 主安全问题统一归档，避免旧状态误导后续开发。
+- 删除已被核心文档吸收或明显过期的 `docs/QAgent_Pet_需求实现文档.md`、`docs/产品转型方向文档.md`、`docs/demo.md`。
+- 删除未跟踪且不属于项目文档的 `docs/简历总结.md`。
+
+本次仅更新和清理文档，未修改业务代码。
+
+---
+
+## 2026-07-06（仓库清理：删除无用本地 worktree 分支）
+
+根据用户要求，清理 `.claude/worktrees/` 下由 Agent 创建的临时 worktree 及其对应的本地分支，避免本地仓库残留无意义的空分支。
+
+**更新内容：**
+- 删除本地分支：
+  - `worktree-agent-a313c288b6e62d14f`
+  - `worktree-agent-a6d2aee0986c331e8`
+  - `worktree-agent-a920bd3c2dd51d452`
+- 同步移除对应的 `.claude/worktrees/agent-*` 工作树目录。
+- 运行 `git worktree prune` 清理已移除工作树的引用。
+
+**验证：**
+- ✅ `git branch -a` 只剩 `master`、`memory-optimization` 及远程跟踪分支。
+- ✅ `git worktree list` 只剩当前主工作树。
+- ✅ 保留未跟踪文件 `docs/简历总结.md` 不动（用户表示不需要同步）。
+
+---
+
 ## 2026-07-03（文档：归档当前已实现需求）
 
 根据用户要求，按 `docs/plan.md` 现有“已实现需求：xxx。”归档格式，将当前已经完成的 Phase 1 Web 端电子宠物化 / 软件化 MVP 补充到已实现需求归档中。

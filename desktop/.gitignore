@@ -1,0 +1,5 @@
+node_modules/
+dist/
+backend.log
+backend_err.log
+*.log
