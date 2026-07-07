@@ -1,6 +1,6 @@
 # QAgent Pet bug / 安全 / 优化追踪
 
-> 最近核验：2026-07-06  
+> 最近核验：2026-07-07  
 > 目标：只保留仍需处理的 Open / Partial 项；已修复问题压缩到“已修复归档”，避免旧审计描述误导后续开发。
 
 ---
@@ -18,11 +18,11 @@
 - `X-User-Id` 已做格式校验。
 - 多数 session、learning、visits 路由已按 `request.state.user_id` 做归属校验。
 - 但 `API_KEY` 为空时仍进入开发模式并跳过认证。
-- `custom_pets` 的部分详情/更新路径仍存在仅按 `pet_id` 查询的情况，需要统一补齐 `user_id` 条件。
+- ~~`custom_pets` 的部分详情/更新路径仍存在仅按 `pet_id` 查询的情况，需要统一补齐 `user_id` 条件。~~ **已修复（2026-07-07）：** `custom_pets` 的 GET/PUT 详情、`chat.py` 的 `get_catchphrase_async` / `get_custom_pet_info`、`sessions.py` 创建会话时的自定义宠物查询均已补齐 `user_id` 归属条件；`POST /api/sessions` 改用 `request.state.user_id`，请求体 `user_id` 不再可信（仅向后兼容保留字段）。
 
 **建议：**
 1. 生产环境强制配置 `API_KEY`，避免误以开发模式上线。
-2. 所有自定义宠物详情、更新、内部查询函数统一使用 `pet_id + user_id`。
+2. ~~所有自定义宠物详情、更新、内部查询函数统一使用 `pet_id + user_id`。~~ 已完成。
 3. 保留预置宠物与自定义宠物的访问边界说明。
 
 ---
@@ -220,6 +220,16 @@
 - 已修复：SQLite 文件权限尝试设置为 `0o600`。
 - 已修复：关键端点接入 `slowapi` 限流。
 
+### 2026-07-07 安全加固（本轮）
+
+- 已修复：`POST /api/sessions` 身份伪造——`create_session` 改用 `request.state.user_id`（`X-User-Id` 头经中间件校验），请求体 `user_id` 字段降级为可选并忽略，前端既有调用不受影响。
+- 已修复：`custom_pets` GET/PUT 详情越权——`get_custom_pet` / `update_custom_pet` 的 SELECT 与 UPDATE 均补齐 `pet_id + user_id` 条件。
+- 已修复：`chat.py` `get_catchphrase_async` / `get_custom_pet_info` 裸按 `pet_id` 读取——新增 `user_id` 参数并在 WHERE 中校验，`chat` 与 `sessions` 内所有调用点已传入 `request.state.user_id` / `session_dict["user_id"]`。
+- 已修复：`sessions.py` 创建会话时对自定义宠物的二次查询（`SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ?`）补齐 `user_id`。
+- 已修复：Electron `desktop/main.js` `spawnBackend` 去除非必要 `shell: true`——非 Windows 一律 `shell:false`，Windows 仅因 `python` 可能是 `.cmd` 垫片而保留 `shell` 并加 `windowsHide` / `windowsVerbatimArguments`，参数固定无注入面。
+- 部分修复：`ip_location.py` 明文 HTTP 与盲目信任 `X-Forwarded-For`——IP 查询优先 HTTPS，免费版 403 时回退 HTTP 并警告；`get_client_ip` 引入 `TRUSTED_PROXIES` 配置，仅在直连来源为可信代理时才采纳转发头，未配置时仅对回环地址退化为旧行为并警告。
+- 已修复：`llm_service._clean_response` 的 thought/reasoning 正则可能误删合法 JSON——改为优先 `json.loads` 解析删除字段后重序列化，解析失败再退回保守正则兜底。
+
 ### LLM / 聊天稳定性
 
 - 已修复：slowapi 参数名冲突导致聊天 500。
@@ -285,7 +295,8 @@
 
 | 优先级 | 项目 | 目标 |
 |--------|------|------|
-| P0 | C-1 自定义宠物详情/更新归属收口 | 防止按 pet_id 越权读取/更新 |
+| ~~P0~~ | ~~C-1 自定义宠物详情/更新归属收口~~ | 已修复（2026-07-07），仅剩 API_KEY 开发模式未强制 |
+| P1 | C-1 剩余项：生产强制 API_KEY + 可信代理配置 | 关闭开发模式与 X-Forwarded-For 伪造面 |
 | P1 | 全局 LLM 并发信号量 | 防止高并发耗尽外部 API 与本地资源 |
 | P1 | VIS-4 / VIS-5 显式事务加固 | 消除串门并发边界问题 |
 | P1 | EMO-M-3 用户画像 merge 显式事务 | 避免后台画像并发覆盖 |

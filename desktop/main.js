@@ -143,9 +143,18 @@ function spawnBackend() {
 
   const out = fs.openSync(backendLogPath(), 'a');
   const err = fs.openSync(backendErrLogPath(), 'a');
-  backendProcess = spawn('python', ['main.py'], {
+  // 安全启动：不经 shell 直接 spawn，避免 shell 注入风险。
+  // 可通过 QAGENT_PYTHON / PYTHON 指定打包后的 Python 可执行文件；
+  // Windows 默认使用 py 启动器，其他平台优先 python3。
+  const isWin = process.platform === 'win32';
+  const pythonCommand = process.env.QAGENT_PYTHON || process.env.PYTHON || (isWin ? 'py' : 'python3');
+  const pythonArgs = isWin && path.basename(pythonCommand).toLowerCase() === 'py'
+    ? ['-3', 'main.py']
+    : ['main.py'];
+  backendProcess = spawn(pythonCommand, pythonArgs, {
     cwd: projectRoot,
-    shell: true,
+    shell: false,
+    windowsHide: true,
     detached: false,
     stdio: ['ignore', out, err]
   });

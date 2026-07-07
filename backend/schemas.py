@@ -9,7 +9,9 @@ class UserCreateRequest(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
+    # user_id 仅保留向后兼容，真实身份以 request.state.user_id（X-User-Id 头）为准
+    # 请求体中的 user_id 若存在则被忽略，防止身份伪造
+    user_id: Optional[str] = Field(None, min_length=1, max_length=100)
     pet_type: str
     nickname: Optional[str] = Field(None, max_length=20)
     custom_pet_id: Optional[str] = None  # 自定义宠物ID

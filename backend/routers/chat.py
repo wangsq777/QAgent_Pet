@@ -199,8 +199,8 @@ def get_catchphrase(pet_type: str, custom_pet_id: str = None) -> str:
     return catchphrases.get(pet_type, "")
 
 
-async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str:
-    """异步获取宠物的口头禅文本（从数据库查询自定义宠物）"""
+async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None, user_id: str = None) -> str:
+    """异步获取宠物的口头禅文本（从数据库查询自定义宠物，带 user_id 归属校验）"""
     catchphrases = {
         "hot_dog": "汪汪，我好想你。",
         "cold_cat": "哼。本咪才不会关心你。",
@@ -211,10 +211,18 @@ async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str
         return catchphrases.get(pet_type, "")
 
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT catchphrase FROM custom_pets WHERE pet_id = ?",
-            (custom_pet_id,)
-        )
+        # 带 user_id 归属校验：未传 user_id 时退化为仅按 pet_id 查（仅用于历史兼容，
+        # 新调用方应始终传入 user_id），防止越权读取他人自定义宠物
+        if user_id:
+            cursor = await db.execute(
+                "SELECT catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                (custom_pet_id, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT catchphrase FROM custom_pets WHERE pet_id = ?",
+                (custom_pet_id,)
+            )
         row = await cursor.fetchone()
 
     if row and row["catchphrase"]:
@@ -223,13 +231,23 @@ async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str
     return ""
 
 
-async def get_custom_pet_info(custom_pet_id: str) -> dict | None:
-    """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None"""
+async def get_custom_pet_info(custom_pet_id: str, user_id: str = None) -> dict | None:
+    """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None
+
+    带 user_id 归属校验：未传 user_id 时退化为仅按 pet_id 查（仅历史兼容），
+    新调用方应始终传入 request.state.user_id，防止越权读取他人宠物。
+    """
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ?",
-            (custom_pet_id,)
-        )
+        if user_id:
+            cursor = await db.execute(
+                "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                (custom_pet_id, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ?",
+                (custom_pet_id,)
+            )
         row = await cursor.fetchone()
 
     if not row:
@@ -367,7 +385,7 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
         system_prompt = ""
 
         if pet_type == "custom" and pet_id:
-            custom_pet_info = await get_custom_pet_info(pet_id)
+            custom_pet_info = await get_custom_pet_info(pet_id, session_dict.get("user_id"))
             if custom_pet_info:
                 pet_name = custom_pet_info["pet_name"]
                 system_prompt = custom_pet_info["system_prompt"]
@@ -513,9 +531,9 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         pet_info = pet_prompts.get(pet_type)
         pet_name = pet_info.PET_NAME if pet_info else "小可爱"
         
-        # 自定义宠物使用自定义名称
+        # 自定义宠物使用自定义名称（带 user_id 归属校验）
         if pet_type == "custom" and custom_pet_id:
-            custom_pet_info = await get_custom_pet_info(custom_pet_id)
+            custom_pet_info = await get_custom_pet_info(custom_pet_id, request.state.user_id)
             if custom_pet_info:
                 pet_name = custom_pet_info["pet_name"]
 
@@ -586,8 +604,8 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         for m in recent_messages
     ]) or "（暂无对话）"
 
-    # 口头禅概率控制
-    catchphrase = await get_catchphrase_async(pet_type, custom_pet_id)
+    # 口头禅概率控制（带 user_id 归属校验，防止越权读取他人自定义宠物口头禅）
+    catchphrase = await get_catchphrase_async(pet_type, custom_pet_id, request.state.user_id)
     catchphrase_rule = ""
     if catchphrase:
         if detect_catchphrase_in_history(recent_messages, catchphrase):

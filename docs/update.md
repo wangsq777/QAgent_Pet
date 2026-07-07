@@ -2,6 +2,73 @@
 
 ---
 
+## 2026-07-07（安全修复：身份伪造 / 自定义宠物越权 / spawn shell / IP 定位加固）
+
+根据 vulnerability-risk-reviewer 报告，集中修复安全与数据隔离风险，不改变前端 API 契约。
+
+**1. `POST /api/sessions` 身份伪造**
+- `backend/routers/sessions.py` `create_session` 改用 `request.state.user_id`（由 `AuthMiddleware` 从 `X-User-Id` 头写入并做格式校验），不再信任请求体 `user_id`。
+- `backend/schemas.py` `SessionCreateRequest.user_id` 降级为 `Optional`，仅向后兼容旧前端调用（字段被忽略），不破坏现有 `frontend/js/api.js` 的 `createSession`。
+
+**2. 自定义宠物 GET/PUT 详情越权**
+- `backend/routers/custom_pets.py` `get_custom_pet`（GET `/detail/{pet_id}`）与 `update_custom_pet`（PUT）的 SELECT 与 UPDATE 均补齐 `AND user_id = ?` 条件，防止按 `pet_id` 越权读取/更新他人宠物。
+
+**3. `chat.py` 内部查询函数越权**
+- `backend/routers/chat.py` `get_catchphrase_async` / `get_custom_pet_info` 新增 `user_id` 参数，并在 WHERE 中校验归属；未传时退化为历史兼容（仅按 `pet_id`）。
+- 更新所有调用点：`chat` 处理器内两处 `get_custom_pet_info` 与一处 `get_catchphrase_async` 传入 `request.state.user_id`；`build_context` 传入 `session_dict["user_id"]`；`sessions.py` `create_session` 传入 `user_id`，并对其二次查询 `custom_pets` 也补齐 `user_id`。
+
+**4. Electron `spawn` shell 风险**
+- `desktop/main.js` `spawnBackend` 去除 `shell: true`，改为不经 shell 直接启动后端；支持通过 `QAGENT_PYTHON` / `PYTHON` 指定 Python 可执行文件，Windows 默认使用 `py -3 main.py`，其他平台默认 `python3 main.py`。
+
+**5. `llm_service._clean_response` JSON 误删**
+- `backend/services/llm_service.py` 新增 `_strip_thought_fields`：优先 `json.loads` 解析整体 JSON 对象，删除 `thought`/`reasoning` 键后重序列化；解析失败再退回保守正则，避免误删合法 JSON 文本。
+
+**6. `ip_location.py` 明文 HTTP 与 X-Forwarded-For 信任**
+- `backend/services/ip_location.py` IP 查询优先 HTTPS，ip-api 免费版 403 时回退 HTTP 并输出警告，提示生产切换支持 HTTPS 的服务。
+- `get_client_ip` 引入 `TRUSTED_PROXIES` 配置（`backend/config.py` 新增，CIDR/IP 逗号分隔），仅在直连来源为可信代理时才采纳 `X-Forwarded-For`/`X-Real-IP`；未配置时仅对回环地址退化为旧行为并警告，防止客户端伪造转发头。
+
+**改动文件：**
+- `backend/schemas.py`
+- `backend/config.py`
+- `backend/routers/sessions.py`
+- `backend/routers/custom_pets.py`
+- `backend/routers/chat.py`
+- `backend/services/llm_service.py`
+- `backend/services/ip_location.py`
+- `desktop/main.js`
+- `docs/bug.md`
+- `docs/update.md`
+
+**剩余风险：**
+- `API_KEY` 为空时仍进入开发模式跳过认证（C-1 剩余项），需生产强制配置。
+- `ip_location` 明文 HTTP 回退仍存在中间人风险，生产应切换支持 HTTPS 的 IP 定位服务。
+- 工具调用仍依赖文本标记解析（H-3 / M-5，未在本轮范围）。
+- 全局 LLM 并发信号量、VIS-4/5 显式事务等见 `docs/bug.md`。
+
+---
+
+## 2026-07-07（文档：评估并补充“帮你选”天气穿衣建议需求）
+
+根据用户提出的“帮你选”功能设想，评估其与当前桌宠项目路线的匹配度，并将需求写入 `docs/plan.md`。
+
+**评估结论：**
+- 该需求可行且与“关系型 AI 电子宠物”的产品定位契合，适合体现宠物人格差异和日常陪伴价值。
+- 当前项目已有 Open-Meteo 天气服务、用户画像地区字段、宠物人格 Prompt、桌宠 2 字气泡与轻聊天窗口，具备实现基础。
+- 该需求不应回填到已完成的 Phase 2 桌宠 MVP，也不属于远期 Phase 4 多端扩展；更适合放入 **Phase 3：桌宠体验增强 + 养成体系**，作为主动提醒能力中的中等偏上优先级“快赢”项。
+
+**更新内容：**
+- 在 `docs/plan.md` Phase 3 Deliverables 中新增“天气穿衣建议（\"帮你选\"）”。
+- 明确根据用户画像城市或本次指定城市查询次日天气，并由当前宠物按自身人格生成穿衣建议。
+- 明确 Hot Dog 等热情型宠物可积极夸赞推荐搭配，Cold Cat 等傲娇型宠物可表达“只是建议，爱穿不穿”，自定义宠物按性格标签、口头禅和特殊习惯生成语气。
+- 明确桌宠端通过 2 字气泡（如“穿衣”“帮选”“带伞”）低敏触发，点击后展开完整建议；Web 端可通过聊天快捷入口或日常分享触发。
+- 补充城市缺失时不编造地点，应提示用户补充城市或设置画像地区。
+- 补充实现约束：优先复用或抽取主动关怀服务，由服务层校验城市和天气参数，不信任 LLM 文本参数。
+- 在 Phase 3 Acceptance Criteria 中新增对应验收标准。
+
+本次仅更新规划文档，未修改业务代码。
+
+---
+
 ## 2026-07-06（修复：daily_share 空白消息防护）
 
 **问题：** Electron 桌宠轻聊天窗口中，当后端返回的 `daily_share` 对象有 `role` 字段但 `content` 为 `undefined` 时，会渲染一条空白的 assistant 消息气泡；Web 聊天主界面也仅判断 `response.daily_share` 是否存在，缺少同类防护。

@@ -72,7 +72,9 @@ def _count_consecutive_days(active_dates: set, now: datetime) -> int:
 @router.post("", response_model=SessionResponse)
 @limiter.limit("10/minute")
 async def create_session(body: SessionCreateRequest, request: Request):
-    user_id = body.user_id
+    # 身份以 AuthMiddleware 写入 request.state.user_id（X-User-Id 头）为准，
+    # 请求体中的 user_id 不再可信，仅保留字段以兼容旧前端调用
+    user_id = request.state.user_id
     pet_type = body.pet_type
     custom_pet_id = body.custom_pet_id
 
@@ -152,15 +154,15 @@ async def create_session(body: SessionCreateRequest, request: Request):
         from backend.prompts.custom_pet import generate_welcome_messages
         from backend.routers.chat import get_custom_pet_info
 
-        # 从数据库获取自定义宠物配置
-        custom_pet_info = await get_custom_pet_info(custom_pet_id)
+        # 从数据库获取自定义宠物配置（带 user_id 归属校验，防止越权读取他人宠物）
+        custom_pet_info = await get_custom_pet_info(custom_pet_id, user_id)
         if custom_pet_info:
             pet_name = custom_pet_info["pet_name"]
-            # 需要更多字段来生成欢迎语，查完整记录
+            # 需要更多字段来生成欢迎语，查完整记录（同样带 user_id 归属校验）
             async with get_db() as db:
                 cursor = await db.execute(
-                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ?",
-                    (custom_pet_id,)
+                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                    (custom_pet_id, user_id)
                 )
                 row = await cursor.fetchone()
             if row:

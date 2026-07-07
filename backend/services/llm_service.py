@@ -24,6 +24,46 @@ class LLMService:
         self.base_url = settings.LLM_BASE_URL
         self.model = settings.LLM_MODEL
 
+    def _strip_thought_fields(self, text: str) -> str:
+        """
+        从 LLM 返回中剥离 thought / reasoning 思考字段。
+
+        策略：
+        1. 优先尝试 JSON 解析：若整体是 JSON 对象，删除 thought/reasoning 键后
+           重新序列化剩余字段，避免正则误删合法内容。
+        2. JSON 解析失败时，退回保守正则：仅匹配字符串起始位置的顶层
+           {"thought": ...} / {"reasoning": ...} 对象，不做跨结构贪婪匹配。
+        """
+        if not text:
+            return text
+
+        stripped = text.strip()
+        # 仅当看起来像 JSON 对象时才尝试解析，减少无谓异常
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict):
+                    # 仅当确实存在思考字段时才改写，否则原样返回（避免重排键序）
+                    if any(k.lower() in ("thought", "reasoning") for k in data.keys()):
+                        for k in list(data.keys()):
+                            if k.lower() in ("thought", "reasoning"):
+                                del data[k]
+                        # 重新序列化；保留 ensure_ascii=False 以兼容中文
+                        return json.dumps(data, ensure_ascii=False)
+                    return text
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        # 保守正则兜底：仅匹配字符串起始的顶层 thought/reasoning 对象
+        cleaned = re.sub(
+            r'^\s*\{\s*"(?:thought|reasoning)"\s*:.*?\}\s*',
+            '',
+            text,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE
+        )
+        return cleaned
+
     def _clean_response(self, text: Optional[str]) -> Optional[str]:
         if not text:
             return None
@@ -38,9 +78,9 @@ class LLMService:
         text = re.sub(r'The user asks[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'So we have a user.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
 
-        # 清理 JSON 格式的思考内容：仅匹配顶层的 thought/reasoning 键，避免误删普通文本
-        text = re.sub(r'^\s*\{\s*"thought"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'^\s*\{\s*"reasoning"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # 清理 JSON 格式的思考内容：优先 JSON 解析删除 thought/reasoning 字段，
+        # 解析失败再退回保守正则兜底，避免正则误删合法 JSON 文本。
+        text = self._strip_thought_fields(text)
 
         # 清理多余的空白字符
         text = re.sub(r'\n{3,}', '\n\n', text)
