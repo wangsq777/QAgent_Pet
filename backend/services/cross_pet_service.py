@@ -181,7 +181,7 @@ class CrossPetService:
 
         llm_messages = [{"role": "user", "content": prompt}]
         result = await llm_service.chat(
-            llm_messages, temperature=0.9, max_tokens=200, caller="visit_turn"
+            llm_messages, temperature=0.9, max_tokens=1024, caller="visit_turn"
         )
 
         if not result:
@@ -261,7 +261,7 @@ class CrossPetService:
         )
         llm_messages = [{"role": "user", "content": summary_prompt}]
         summary = await llm_service.chat(
-            llm_messages, temperature=0.5, max_tokens=300, caller="visit_summary"
+            llm_messages, temperature=0.5, max_tokens=1024, caller="visit_summary"
         )
         if not summary:
             summary = f"和{guest_persona['pet_name'] if guest_persona else '朋友'}的一次串门对话。"

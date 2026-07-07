@@ -2,237 +2,332 @@
 
 ---
 
-需求：口头禅概率控制已实现。
+## 已实现需求归档
 
-需求：自定义宠物持久化存储已实现。
+已实现需求：口头禅概率控制。
 
-需求：自定义宠物删除功能已实现。
+已实现需求：自定义宠物持久化存储。
 
-需求：自定义宠物开场白 LLM 生成已实现。
+已实现需求：自定义宠物删除功能。
 
-需求：宠物 Agent 串门通信（Phase 1 核心功能 + Phase 2 记忆沉淀）已实现。
+已实现需求：自定义宠物开场白 LLM 生成。
+
+已实现需求：宠物 Agent 串门通信（Phase 1 核心功能 + Phase 2 记忆沉淀）。
+
+已实现需求：情绪感知两层架构重构。
+
+已实现需求：宠物陪你学 GitHub 开源项目教学功能。
+
+已实现需求：情感捕捉细化（不在前端显式展示用户心情）。
+
+已实现需求：产品转型 Phase 1 Web 端电子宠物化 / 软件化 MVP。
+
+已实现需求：产品转型 Phase 2 桌宠 MVP。
 
 ---
 
-## [2026-06-17] Plan for 情绪感知两层架构重构
+## [2026-07-01] Plan for 产品转型阶段化落地（保留未实现部分）
 
 ### Requirement
 
-将当前阻塞在响应路径中的独立 LLM 情绪识别调用（`llm_service.extract_emotion`）拆分为两层：
+基于 `docs/产品转型方向文档.md` 及现有需求计划，将项目从“QQ 智能宠物伴侣 Agent”逐步转型为“个人 AI 电子宠物伴侣”。
 
-- **前台**：将情绪标签（`emotion`，取值 `happy/sad/anxious/tired/neutral`）内嵌进主 LLM 调用，令主 LLM 在生成宠物回复的同时以 JSON 格式同步输出结构化字段，彻底消除额外的 LLM 调用。情绪标签写入 `messages.emotion_tag`，用于亲密度计算及 `ChatResponse` 返回前端。
-- **后台**：新增专职情绪后台 Agent，每隔 N 轮读取最近对话历史，输出用户的长期情绪倾向描述（如”最近持续焦虑，偶尔开心”），异步写入 `user_profiles.mood_tendency`。使用 `FastAPI BackgroundTasks` 实现零阻塞。
+转型后的产品主线：
 
-### Design Overview
+- **QAgent Pet Core**：复用现有 FastAPI 后端，作为统一宠物智能核心。
+- **Web 端**：完整功能中心，承载聊天、记忆、学习、串门、自定义宠物等完整能力。
+- **桌宠端**：下一阶段重点入口，提供桌面常驻、气泡聊天、主动陪伴、提醒与快速打开 Web 面板。
+- **QQ/IM 入口**：从当前主线降级为远期可选扩展，不作为短期核心依赖。
 
-#### 前台：主 LLM 结构化输出
+核心差异化：不与通用 AI 助手竞争效率问答，而是主打“关系型 AI 电子宠物”：长期记忆、主动关怀、人格连续性、轻养成、陪伴感。
 
-当前 `full_prompt` 末尾要求 LLM”直接输出回复内容”，回复是纯文本。改造后要求 LLM 输出 JSON：
+### 已实现阶段
 
-```json
-{
-  “reply”: “宠物的回复内容（含工具调用标记、日程标记等，与现在格式一致）”,
-  “emotion”: “neutral”
-}
-```
+已实现需求：产品转型 Phase 0 情感捕捉细化。
 
-**关键约束**：
-1. `reply` 字段内容与当前纯文本回复格式完全一致，工具调用标记 `[TOOL_CALL]...[/TOOL_CALL]`、日程标记 `[SCHEDULE:...]` 原样保留在 `reply` 字段内，下游解析逻辑不变。
-2. `emotion` 字段只能是五选一：`happy / sad / anxious / tired / neutral`。
-3. `_call_llm` 不新增结构化输出模式，改为在 `chat.py` 内直接解析 JSON 文本，失败时 `emotion` 降级为 `”neutral”`，`reply` 降级为原始文本。
+已实现需求：产品转型 Phase 1 Web 端电子宠物化 / 软件化 MVP。
 
-**Prompt 末尾改动**（`chat.py` 中 `full_prompt` 末尾两行）：
-
-```
-# 删除
-请用{pet_type}的性格风格回复，直接输出回复内容。
-
-# 替换为
-请用{pet_type}的性格风格回复，并以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
-{{“reply”: “你的回复内容”, “emotion”: “用户情绪标签(happy/sad/anxious/tired/neutral)”}}
-其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。
-```
-
-**JSON 解析辅助函数**（新增于 `chat.py`）：
-
-```python
-def parse_structured_reply(raw: str) -> tuple[str, str]:
-    “””
-    解析主 LLM 的结构化输出，返回 (reply_text, emotion_tag)。
-    失败时返回 (raw, “neutral”)。
-    “””
-    import json, re
-    valid_emotions = {“happy”, “sad”, “anxious”, “tired”, “neutral”}
-    try:
-        # 尝试直接解析
-        data = json.loads(raw)
-        reply = data.get(“reply”, raw)
-        emotion = data.get(“emotion”, “neutral”).strip().lower()
-        if emotion not in valid_emotions:
-            emotion = “neutral”
-        return reply, emotion
-    except Exception:
-        # 尝试从文本中提取 JSON 块（LLM 有时会在 JSON 前后加文字）
-        match = re.search(r'\{.*?”reply”.*?”emotion”.*?\}', raw, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group())
-                reply = data.get(“reply”, raw)
-                emotion = data.get(“emotion”, “neutral”).strip().lower()
-                if emotion not in valid_emotions:
-                    emotion = “neutral”
-                return reply, emotion
-            except Exception:
-                pass
-        return raw, “neutral”
-```
-
-**工具调用（ReAct）路径**：`execute_tools_and_build_final_prompt` 的二次 LLM 调用（`caller=”tool_feedback”`）也需要同样的结构化输出改造。该函数的 `second_prompt` 末尾同步更新，解析逻辑复用 `parse_structured_reply`。
-
-#### 后台：情绪 Agent（BackgroundTasks）
-
-新增文件 `backend/services/mood_agent.py`，实现 `MoodAgent` 类：
-
-```python
-class MoodAgent:
-    TRIGGER_INTERVAL = 5  # 每 5 轮对话触发一次
-
-    async def should_trigger(self, session_id: str, total_chats: int) -> bool:
-        return total_chats % self.TRIGGER_INTERVAL == 0
-
-    async def analyze_mood_tendency(self, user_id: str, session_id: str) -> None:
-        “””
-        读取最近 15 条用户消息，输出情绪倾向文本，写入 user_profiles.mood_tendency。
-        “””
-```
-
-**Prompt 设计**：
-
-```
-以下是用户最近的发言（按时间顺序）：
-{最近 15 条 role=user 的消息内容}
-
-请用 20 字以内描述这位用户近期的情绪倾向（如”最近持续焦虑，偶尔开心”）。
-直接输出描述文字，不要任何解释。
-```
-
-**触发逻辑**（`chat.py` 的 `chat` 函数末尾）：
-
-```python
-from fastapi import BackgroundTasks
-
-# chat 函数签名追加 background_tasks 参数
-async def chat(request: Request, session_id: str, chat_req: ChatRequest, background_tasks: BackgroundTasks):
-    ...
-    # 在 return ChatResponse 之前注册后台任务
-    if await mood_agent.should_trigger(session_id, new_total_chats):
-        background_tasks.add_task(
-            mood_agent.analyze_mood_tendency,
-            user_id=session_dict[“user_id”],
-            session_id=session_id
-        )
-```
-
-#### user_profile_agent 的 mood_tendency 字段处理
-
-`user_profile_agent.analyze_and_extract` 的 Prompt 目前包含 `mood_tendency` 字段，导致它也在每轮更新这个字段，与新的专职 Agent 产生竞争写入。
-
-处理方案：**从 `user_profile_agent` 的 Prompt 中移除 `mood_tendency` 字段**，该字段的更新权交给 `MoodAgent` 独占。`memory_service.merge_user_profile` 的合并逻辑本身是字段级 UPSERT，两个 Agent 写不同字段不会冲突，只需从 `user_profile_agent` 的 Prompt 和 JSON schema 中删去该字段即可。
-
-#### ChatResponse 字段
-
-`ChatResponse.emotion_tag` 字段保留不变，来源从 `llm_service.extract_emotion` 的返回值改为 `parse_structured_reply` 的第二个返回值。前端零改动。
-
-#### 数据流图
-
-```
-用户消息
-   │
-   ▼
-主 LLM 调用（caller=”main_chat”）
-   │  full_prompt 末尾要求 JSON 输出
-   │  {reply: “...”, emotion: “sad”}
-   ▼
-parse_structured_reply()
-   ├─ reply_text  → execute_tools_and_build_final_prompt → 最终回复
-   └─ emotion_tag → calculate_intimacy_change → 亲密度计算
-                  → save_message(emotion_tag=...) → messages 表
-                  → ChatResponse.emotion_tag → 前端
-
-(每 5 轮，response 返回后异步)
-   ▼
-MoodAgent.analyze_mood_tendency()
-   │  读取最近 15 条用户消息
-   │  轻量 LLM 调用（caller=”mood_agent”）
-   └─ 写入 user_profiles.mood_tendency
-```
-
-### Implementation Tasks
-
-1. **`backend/routers/chat.py`（核心改造）**
-   1. 新增辅助函数 `parse_structured_reply(raw: str) -> tuple[str, str]`（含 JSON 解析 + 正则兜底）
-   2. 修改 `full_prompt` 末尾指令：将”直接输出回复内容”替换为 JSON 格式要求
-   3. 修改主 LLM 调用后的处理逻辑：
-      - `raw_reply = await llm_service.chat(..., caller=”main_chat”)`
-      - `reply, emotion_tag = parse_structured_reply(raw_reply or fallback_text)`（注意 fallback 分支）
-   4. 删除 `emotion_tag = await llm_service.extract_emotion(...)` 这一行（第 565 行）
-   5. 修改 `execute_tools_and_build_final_prompt`：
-      - `second_prompt` 末尾同步改为 JSON 格式要求
-      - 函数返回值从 `(str, dict)` 改为 `(str, str, dict)`，增加 `emotion_tag` 返回
-      - 或在调用处对二次 LLM 结果再次调用 `parse_structured_reply`（推荐，避免修改函数签名）
-   6. 在函数签名加入 `background_tasks: BackgroundTasks`，并在 `return ChatResponse` 前注册后台任务
-   7. 在文件顶部 import `BackgroundTasks` 和 `mood_agent`
-
-2. **新增 `backend/services/mood_agent.py`**
-   - 实现 `MoodAgent` 类，含 `should_trigger` 和 `analyze_mood_tendency` 方法
-   - `analyze_mood_tendency` 内：读取 session 最近 15 条 `role=user` 消息 → 构建 Prompt → 调用轻量 LLM → 写入 `user_profiles.mood_tendency`（通过 `memory_service.merge_user_profile`）
-   - 导出全局单例 `mood_agent`
-
-3. **`backend/services/user_profile_agent.py`**
-   - 从 `PROFILE_EXTRACT_PROMPT` 的说明列表中删除第 7 条”情绪倾向”
-   - 从 JSON schema 示例中删除 `”mood_tendency”` 字段
-   - 从 `has_data` 检查逻辑中无需改动（字段消失后自然不会产生该字段的值）
-
-4. **`backend/services/llm_service.py`**
-   - `extract_emotion` 方法可保留（供其他潜在调用方使用），但在 `chat.py` 中不再调用它
-   - 无需新增结构化输出模式，`_call_llm` 不变
-
-5. **`backend/schemas.py`**
-   - `ChatResponse` 不变（`emotion_tag: str` 字段保留）
-
-6. **`docs/update.md`**
-   - 按项目规范记录本次更新内容
-
-### Risks and Mitigations
-
-| 风险 | 影响 | 缓解措施 |
-|------|------|---------|
-| 主 LLM 不遵循 JSON 格式，返回纯文本 | emotion 降级为 neutral，reply 内容仍可正常展示 | `parse_structured_reply` 的双重兜底（直接解析 + 正则提取）已覆盖大多数情况 |
-| 主 LLM 将 reply 字段内容截断或编码 JSON 特殊字符 | 回复内容缺失或乱码 | 解析失败时直接用 `raw` 原文作为 reply，不丢弃用户体验 |
-| 工具调用路径（ReAct）的二次 LLM 也改了格式 | 工具结果回复丢失 | `execute_tools_and_build_final_prompt` 的 `second_prompt` 同步改造，复用 `parse_structured_reply`，emotion 忽略（工具轮次不更新 emotion） |
-| `mood_agent` 写入 `mood_tendency` 与 `user_profile_agent` 竞争 | 字段互相覆盖 | 从 `user_profile_agent` Prompt 中删除该字段，`merge_user_profile` 的 field-level 合并逻辑天然隔离 |
-| 后台 mood_agent 调用 LLM 失败 | 不影响响应；该轮 `mood_tendency` 不更新 | `analyze_mood_tendency` 内 try/except 全局兜底，失败只记日志 |
-| 每隔 5 轮的触发条件基于 `new_total_chats` 的模运算，多 session 场景下可能同时触发多个后台任务 | LLM 并发消耗增加 | 轻量模型 + 每任务独立超时，可接受；后续可加分布式限流 |
-
-### Testing Strategy
-
-- **单元测试 `parse_structured_reply`**：
-  - 输入合法 JSON：断言 reply 和 emotion 正确提取
-  - 输入 JSON 前后带冗余文字：断言正则提取仍成功
-  - 输入纯文本（LLM 拒绝 JSON 格式）：断言返回 `(raw, “neutral”)`
-  - 输入 emotion 为非法值（如 `”angry”`）：断言 emotion 降级为 `”neutral”`
-- **集成测试（chat 端点）**：
-  - Mock `llm_service.chat` 返回合法 JSON → 断言 `ChatResponse.emotion_tag` 非 neutral（如 `sad`）
-  - Mock `llm_service.chat` 返回纯文本 → 断言请求仍成功，`emotion_tag == “neutral”`
-  - 验证 `llm_service.extract_emotion` 不再被调用（Mock 断言 call_count == 0）
-- **后台任务测试**：
-  - 触发第 5 轮对话后检查 `user_profiles.mood_tendency` 是否被写入
-  - Mock `mood_agent.analyze_mood_tendency` 抛异常 → 断言 `ChatResponse` 仍正常返回
-- **回归测试**：
-  - 日程标记 `[SCHEDULE:...]` 在 reply 字段内仍被正确解析提取
-  - 工具调用标记 `[TOOL_CALL]...[/TOOL_CALL]` 在 reply 字段内仍被正确执行
-  - 亲密度计算：`emotion_tag == “sad”` 时 `intimacy_change == 3`，其余为 1
+已实现需求：产品转型 Phase 2 桌宠 MVP。
 
 ---
 
-已实现需求：宠物陪你学 GitHub 开源项目教学功能。
+## 补充需求：本地桌面软件交付形态与 HTML 前端软件化
+
+最终桌宠形态应按“本地桌面软件”交付，而不是要求普通用户下载源码项目、安装 Python 依赖并手动运行。
+
+关键结论：
+
+1. **技术栈不必从 HTML/CSS/JavaScript 推翻重写。**
+   - 现有前端可继续作为桌面应用内嵌页面，被 Electron / Tauri 等桌面壳加载。
+   - 用户最终感知到的是 `QAgent Pet` 安装包、桌面图标、主窗口和桌宠窗口，而不是浏览器网页或项目源码目录。
+2. **需要改的是界面形态，而不是文件格式。**
+   - Web 前端应从“普通网页聊天界面”逐步改为“桌面软件主窗口 / 宠物控制中心”。
+   - 交互可类比微信桌面端：固定窗口布局、左侧导航、主内容区、状态侧栏、系统托盘、通知、关闭到后台等软件体验。
+3. **最终桌面端建议拆成两个窗口。**
+   - 桌宠小窗口：透明、无边框、置顶、可拖拽、气泡聊天、轻提醒。
+   - 主软件窗口：加载现有软件化后的 HTML 前端，承载完整聊天、记忆、陪学、串门、自定义宠物、桌宠设置和数据管理。
+4. **不要让用户直接保存整个项目使用。**
+   - 后续应通过 Electron / Tauri + 后端打包方案，将前端资源、桌面壳、后端服务和本地数据目录整合为可安装/可启动的桌面应用。
+   - 开发阶段可继续本地源码运行；产品交付阶段应提供安装包或可执行程序。
+
+---
+
+## Overall Roadmap
+
+```text
+Phase 0 情感捕捉细化（已实现）
+  → Phase 1 产品定位调整 + Web 端电子宠物化 / 软件化（已实现 MVP）
+  → Phase 2 桌宠 MVP（当前优先）
+  → Phase 3 桌宠体验增强 + 养成体系
+  → Phase 4 QQ/IM/移动端扩展
+```
+
+优先级：**Phase 2 > Phase 3 > Phase 4**。Phase 1 已完成 Web 端 MVP，后续只做增量修补。
+
+---
+
+## Phase 1：产品定位调整 + Web 端电子宠物化 / 软件化
+
+### Status
+
+已实现 MVP：产品定位文档、基础宠物状态、亲密度、陪我学、串门、Web 主界面软件化、桌宠预览入口、轻养成面板已完成；后续可继续增强桌宠端真实托盘/通知/开机自启等 Electron 能力。
+
+### Goal
+
+统一产品叙事，并先在 Web 端验证“电子宠物感”和“桌面软件主窗口感”，让 Web 从单纯聊天网页升级为完整宠物功能中心。
+
+### Deliverables
+
+1. Web 主界面软件化：
+   - 保留 HTML/CSS/JavaScript 技术路线，不为桌面端盲目重写原生 UI。
+   - 将当前网页感界面调整为类似桌面软件的 App Shell：左侧固定导航、主内容区、右侧宠物状态/记忆侧栏、底部输入或操作区。
+   - 主窗口应具备“宠物控制中心”语义，承载完整聊天、记忆、陪学、串门、自定义宠物、桌宠设置和数据管理。
+   - 增加桌面端概念入口：打开桌宠、关闭到托盘、勿扰模式、开机自启、通知设置、数据目录、版本信息等。
+   - 视觉和交互目标是让用户感觉在使用本地软件，而不是普通浏览器网页。
+2. Web 端宠物状态组件完善：
+   - 状态示例：`idle / happy / lonely / sleepy / studying`。
+   - 状态来源优先结合最近互动、情感信号、学习模式和亲密度。
+3. 简单宠物动画：
+   - MVP 阶段使用图片 + CSS 动画。
+   - 暂不引入 Live2D，避免复杂度过早上升。
+4. 轻养成信息面板：
+   - 今日互动次数。
+   - 陪伴时长。
+   - 连续互动天数。
+   - 亲密度/关系等级。
+5. 桌宠模式入口或预览页：
+   - 让用户理解后续桌宠形态。
+   - 可复用未来桌宠 UI 的最小组件。
+6. 文案调整：
+   - 从“聊天 AI / QQ Agent”转向“电子宠物陪伴 / 你的桌面伙伴”。
+
+### Acceptance Criteria
+
+- Web 主界面从普通网页导航升级为桌面软件式 App Shell，具备固定导航、主内容区和状态/设置区域。
+- 用户在主界面中能找到桌宠控制相关入口，例如打开桌宠、勿扰模式、托盘/通知设置或桌宠预览。
+- Web 端能看到更完整的宠物当前状态或状态动画。
+- 轻养成数据能与现有消息记录、亲密度、学习数据联动。
+- 不破坏现有聊天、学习、串门、自定义宠物功能。
+- 桌宠入口/预览能清晰表达下一阶段方向。
+
+---
+
+## Phase 2：桌宠 MVP
+
+### Status
+
+MVP 已实现：已新增 Electron 桌宠工程，跑通透明置顶桌宠、轻聊天窗口、2 字低敏提醒气泡、托盘菜单、勿扰模式、打开完整 Web 面板、后端检测/拉起，以及桌宠与 Web 共用后端会话与记忆。安装包产物、开机自启、位置记忆、多显示器适配和数据目录迁移仍放入 Phase 3/后续增强。
+
+### Goal
+
+用 Electron 快速验证桌面常驻陪伴形态，跑通“桌面常驻 + 气泡聊天 + 主动提醒 + 打开 Web 面板”的最小闭环。
+
+### Deliverables
+
+1. 新增 Electron 桌宠工程：
+   - 建议目录：`desktop/`。
+   - 包含 `main.js`、`preload.js`、`renderer/` 等基础结构。
+   - 桌面端交付目标是安装包/可执行程序，不要求用户直接保存源码项目并手动启动。
+   - 主软件窗口可加载 Phase 1 软件化后的 HTML 前端，桌宠小窗口加载 `desktop_pet.html` 或等价轻量页面。
+2. 透明无边框置顶窗口：
+   - 支持拖拽移动。
+   - 支持关闭到系统托盘。
+3. 点击宠物弹出聊天气泡：
+   - 发送用户输入。
+   - 调用现有聊天 API。
+   - 展示 LLM 思考态与回复气泡。
+4. 桌面情境提醒气泡（MVP 轻量版）：
+   - 气泡只承担“提醒宠物发消息了/想互动”的提示职责，不直接呈现完整回复内容，避免桌面打扰和隐私暴露。
+   - 气泡文案采用 2 个字左右的极短概括，用于表达宠物当前心情或本次消息主题，例如“找你”“想你”“等待”“无聊”“鼓励”“提醒”。
+   - 用户点击气泡或宠物后再展开完整聊天面板，查看完整问候、回复或主动关怀内容。
+   - MVP 阶段只使用低敏桌面情境信号，例如当前时间段、最近互动时间、后端情感趋势、学习状态、勿扰模式。
+   - 不读取屏幕内容、聊天窗口内容或敏感应用内容，避免隐私风险和实现复杂度过早上升。
+   - 气泡应支持自动消失、用户点击展开/收起、勿扰模式下静默。
+5. 主动关怀桌面气泡：
+   - 基于最近互动时间、情感趋势、学习状态触发。
+   - MVP 可先用简单规则。
+6. 右键菜单：
+   - 打开完整 Web 面板。
+   - 切换勿扰/退出。
+7. 后端启动与连接：
+   - 检测本地后端端口。
+   - 必要时自动启动后端。
+   - 启动失败时给出明确提示。
+
+### Acceptance Criteria
+
+- 桌宠可独立启动并连接/拉起后端。
+- 桌面端能以安装包/可执行程序为目标进行工程组织，用户不需要理解或直接操作源码目录。
+- 主软件窗口能加载软件化后的 Web 前端，桌宠小窗口与主窗口职责清晰分离。
+- 桌宠窗口透明、无边框、置顶、可拖拽。
+- 气泡聊天完整走通：输入 → 思考 → 回复。
+- 宠物问候与轻量主动关怀能触发桌面提醒气泡。
+- 桌面提醒气泡只展示 2 个字左右的心情/主题概括，不直接展示完整消息内容。
+- 点击气泡或宠物后能展开完整聊天面板查看消息。
+- 桌面情境提醒仅使用低敏信号，不读取屏幕内容或敏感应用内容。
+- 右键可以打开完整 Web 面板。
+- 关闭窗口后程序进入托盘驻留。
+- 桌宠和 Web 共用同一后端会话与记忆。
+
+---
+
+## Phase 3：桌宠体验增强 + 养成体系
+
+### Status
+
+未实现。
+
+### Goal
+
+在桌宠 MVP 验证可行后，将桌宠从“能用”升级为“适合长期挂着”的陪伴产品。
+
+### Deliverables
+
+1. 桌宠基础体验增强：
+   - 开机自启。
+   - 窗口位置记忆。
+   - 多显示器适配。
+   - 勿扰模式。
+   - 通知隐私设置。
+2. 宠物状态动画增强：
+   - idle：待机/呼吸。
+   - happy：开心跳动。
+   - lonely：等待陪伴。
+   - sleepy：困倦/睡觉。
+   - studying：陪学状态。
+3. 主动提醒能力：
+   - 久坐提醒。
+   - 喝水提醒。
+   - 睡觉提醒。
+   - 学习计划提醒。
+4. 学习陪伴桌宠化：
+   - 和现有“陪你学 GitHub 项目”能力联动。
+   - 章节完成后桌宠庆祝。
+   - 学习停滞时温和提醒。
+5. 多宠物切换：
+   - 复用现有自定义宠物持久化能力。
+   - 保持每只宠物的人格、口头禅、开场白与记忆连续性。
+6. 数据目录与备份：
+   - SQLite 从项目目录迁移到用户应用数据目录，例如 `%APPDATA%/QAgentPet/`。
+   - 提供旧库自动复制、备份、回退路径。
+   - 提供本地备份与恢复能力。
+7. 天气穿衣建议（"帮你选"）：
+   - 根据用户画像中的城市或用户本次指定城市，查询次日天气，复用现有 `weather_service` 与 Open-Meteo 预报能力。
+   - 由当前宠物以自身人格语气生成穿衣建议：Hot Dog 等热情型宠物可以积极夸赞推荐搭配，强调用户明天这样穿会很好看；Cold Cat 等傲娇型宠物可以表示只是建议，爱穿不穿；自定义宠物按其性格标签、口头禅和特殊习惯生成对应语气。
+   - 建议优先作为 Phase 3 主动关怀 / 轻提醒能力的一部分落地：桌宠端通过 2 字气泡（如“穿衣”“帮选”“带伞”）低敏触发，点击后展开完整建议；Web 端可通过聊天快捷入口或日常分享触发。
+   - 城市缺失时不默认编造地点，应先提示用户补充城市或在用户画像中设置地区。
+   - 实现应优先复用或抽取主动关怀服务，避免继续在 chat / sessions 路径重复堆叠日常分享和主动提醒逻辑。
+   - 天气参数获取应由服务层校验城市并直接调用天气 API，只把结构化天气结果交给 LLM 生成人格化文案。
+
+### Acceptance Criteria
+
+- 重启电脑后桌宠可自动启动并恢复上次位置。
+- 勿扰模式下不弹出主动气泡，但托盘仍驻留。
+- 至少 5 种宠物状态动画可稳定切换。
+- 用户画像已配置城市或用户本次指定城市时，宠物能基于次日天气生成符合自身人格语气的穿衣建议；桌宠端可通过 2 字气泡低敏触发，并在点击后展开完整内容。
+- 学习陪伴模式和现有学习数据联动。
+- SQLite 迁移不丢失聊天记录、亲密度、宠物配置和学习数据。
+- 本地备份/恢复可验证成功。
+
+---
+
+## Phase 4：QQ/IM/移动端扩展
+
+### Status
+
+未实现，远期规划。
+
+### Goal
+
+在 Web + 桌宠主线稳定后，将 QQ、其他 IM 或移动端作为可选入口接入统一宠物核心。
+
+### Deliverables
+
+1. QQ Bot 适配器：
+   - 接入统一聊天 API。
+   - 保持人格、记忆、亲密度连续。
+2. 移动端 H5 或小程序入口：
+   - 轻量聊天。
+   - 宠物状态查看。
+   - 基础提醒设置。
+3. 多端会话同步：
+   - 同一用户下跨端同步消息、记忆、宠物状态。
+   - 避免多个入口各自形成孤立人格。
+
+### Acceptance Criteria
+
+- QQ/移动端消息能触发宠物回复。
+- 多端共享同一宠物人格、记忆、亲密度。
+- Web、桌宠、QQ/移动端切换时上下文不割裂。
+
+---
+
+## Cross-Phase Dependencies
+
+```text
+Phase 0 情感捕捉细化（已实现）
+    │  为宠物状态系统、主动关怀和桌宠行为决策提供结构化情感信号
+    ▼
+Phase 1 产品定位调整 + Web 端电子宠物化 / 软件化
+    │  先在 Web 端验证电子宠物叙事和 UI，再投入桌宠工程
+    ▼
+Phase 2 桌宠 MVP
+    │  验证桌面常驻形态是否成立
+    ▼
+Phase 3 桌宠体验增强 + 养成体系
+    │  在 MVP 稳定后再增强长期陪伴、提醒、备份和数据迁移
+    ▼
+Phase 4 QQ/IM/移动端扩展
+```
+
+依赖说明：
+
+- Phase 1 已完成 Web 端 MVP，后续只做必要体验修补，不再作为主线投入。
+- Phase 2 是当前优先阶段，也是转型是否成立的关键里程碑。
+- Phase 3 应在桌宠 MVP 证明有使用价值后再投入。
+- Phase 4 不应抢占当前 Web + 桌宠主线资源。
+
+---
+
+## Risks and Mitigations
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|---------|
+| Electron 包体过大/内存较高 | 影响“轻量桌宠”预期 | MVP 用 Electron 验证功能；后续评估 Tauri；打包时排除无关资源 |
+| 后端自动启动失败 | 桌宠无法使用 | 首次启动环境自检；端口检测；失败时给出明确修复指引；长期可考虑 PyInstaller 打包后端 |
+| SQLite 迁移损坏用户数据 | 聊天记录、亲密度、学习数据丢失 | 迁移前检测旧库；先复制再切换；保留备份和回退路径；提供手动恢复说明 |
+| Web 宠物化/软件化影响现有功能 | 聊天、学习、串门等核心能力回归 | UI 改造作为增量叠加；核心业务逻辑尽量不动；增加回归测试 |
+| 桌宠与 Web 会话不同步 | 用户跨端体验割裂 | 共用同一 session/user/memory API；桌宠打开 Web 时传递当前会话信息 |
+| 桌面情境提醒气泡过度打扰或引发隐私担忧 | 用户可能觉得被监控、被打断，或在桌面暴露完整私密消息 | MVP 只使用低敏上下文信号；气泡只展示 2 个字左右概括，不展示完整内容；默认控制频率；提供勿扰模式；不读取屏幕内容、窗口文本或敏感应用内容 |
+| 过早引入 Live2D 或复杂动画 | 开发周期失控 | MVP 坚持图片 + CSS 动画；Live2D 作为后续可选资源包 |
+
+---
+
+## Implementation Recommendations
+
+1. **优先做 Phase 2**：新增 Electron / Tauri 桌宠工程，先跑通独立启动、透明置顶窗口、气泡聊天、托盘和后端自动连接。
+2. **桌宠 MVP 只做最小闭环**：桌宠小窗口负责常驻陪伴和轻聊天，完整聊天、记忆、陪学、串门、自定义宠物继续由 Web 主窗口承载。
+3. **后端继续作为统一 Core**：桌宠不重写后端，只作为新客户端调用现有 API。
+4. **可新增桌宠专用 API 子集**：后续可考虑 `/api/desktop/`，只返回桌宠需要的聊天、状态、提醒、当前宠物信息。
+5. **不要过早做 Live2D**：先用静态图 + CSS 动画验证陪伴闭环。
+6. **数据迁移放到 Phase 3**：SQLite 用户数据目录迁移风险高，应在桌宠 MVP 稳定后进行。

@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-small"
 
+    # 可信反向代理 CIDR 列表（逗号分隔）。
+    # 仅当请求直接来自这些代理时，才信任 X-Forwarded-For / X-Real-IP，
+    # 防止客户端伪造这些头部。生产部署在 Render / nginx / Caddy 之后时应配置为代理出口 IP。
+    # 留空表示不启用可信代理校验（仅本地开发安全）。
+    TRUSTED_PROXIES: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -32,6 +32,11 @@ wheels/
 *.log
 llm_debug.log
 
+# Electron desktop app
+/desktop/node_modules/
+/desktop/dist/
+/desktop/*.log
+
 # IDE
 .idea/
 .vscode/
@@ -45,6 +50,7 @@ Thumbs.db
 
 # AI/Agent workspace caches
 .agents/
+.qoder/
 .claude/worktrees/
 .workbuddy/
 AGENTS.md

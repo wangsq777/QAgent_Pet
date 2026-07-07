@@ -2,6 +2,412 @@
 
 ---
 
+## 2026-07-07（安全修复：身份伪造 / 自定义宠物越权 / spawn shell / IP 定位加固）
+
+根据 vulnerability-risk-reviewer 报告，集中修复安全与数据隔离风险，不改变前端 API 契约。
+
+**1. `POST /api/sessions` 身份伪造**
+- `backend/routers/sessions.py` `create_session` 改用 `request.state.user_id`（由 `AuthMiddleware` 从 `X-User-Id` 头写入并做格式校验），不再信任请求体 `user_id`。
+- `backend/schemas.py` `SessionCreateRequest.user_id` 降级为 `Optional`，仅向后兼容旧前端调用（字段被忽略），不破坏现有 `frontend/js/api.js` 的 `createSession`。
+
+**2. 自定义宠物 GET/PUT 详情越权**
+- `backend/routers/custom_pets.py` `get_custom_pet`（GET `/detail/{pet_id}`）与 `update_custom_pet`（PUT）的 SELECT 与 UPDATE 均补齐 `AND user_id = ?` 条件，防止按 `pet_id` 越权读取/更新他人宠物。
+
+**3. `chat.py` 内部查询函数越权**
+- `backend/routers/chat.py` `get_catchphrase_async` / `get_custom_pet_info` 新增 `user_id` 参数，并在 WHERE 中校验归属；未传时退化为历史兼容（仅按 `pet_id`）。
+- 更新所有调用点：`chat` 处理器内两处 `get_custom_pet_info` 与一处 `get_catchphrase_async` 传入 `request.state.user_id`；`build_context` 传入 `session_dict["user_id"]`；`sessions.py` `create_session` 传入 `user_id`，并对其二次查询 `custom_pets` 也补齐 `user_id`。
+
+**4. Electron `spawn` shell 风险**
+- `desktop/main.js` `spawnBackend` 去除 `shell: true`，改为不经 shell 直接启动后端；支持通过 `QAGENT_PYTHON` / `PYTHON` 指定 Python 可执行文件，Windows 默认使用 `py -3 main.py`，其他平台默认 `python3 main.py`。
+
+**5. `llm_service._clean_response` JSON 误删**
+- `backend/services/llm_service.py` 新增 `_strip_thought_fields`：优先 `json.loads` 解析整体 JSON 对象，删除 `thought`/`reasoning` 键后重序列化；解析失败再退回保守正则，避免误删合法 JSON 文本。
+
+**6. `ip_location.py` 明文 HTTP 与 X-Forwarded-For 信任**
+- `backend/services/ip_location.py` IP 查询优先 HTTPS，ip-api 免费版 403 时回退 HTTP 并输出警告，提示生产切换支持 HTTPS 的服务。
+- `get_client_ip` 引入 `TRUSTED_PROXIES` 配置（`backend/config.py` 新增，CIDR/IP 逗号分隔），仅在直连来源为可信代理时才采纳 `X-Forwarded-For`/`X-Real-IP`；未配置时仅对回环地址退化为旧行为并警告，防止客户端伪造转发头。
+
+**改动文件：**
+- `backend/schemas.py`
+- `backend/config.py`
+- `backend/routers/sessions.py`
+- `backend/routers/custom_pets.py`
+- `backend/routers/chat.py`
+- `backend/services/llm_service.py`
+- `backend/services/ip_location.py`
+- `desktop/main.js`
+- `docs/bug.md`
+- `docs/update.md`
+
+**剩余风险：**
+- `API_KEY` 为空时仍进入开发模式跳过认证（C-1 剩余项），需生产强制配置。
+- `ip_location` 明文 HTTP 回退仍存在中间人风险，生产应切换支持 HTTPS 的 IP 定位服务。
+- 工具调用仍依赖文本标记解析（H-3 / M-5，未在本轮范围）。
+- 全局 LLM 并发信号量、VIS-4/5 显式事务等见 `docs/bug.md`。
+
+---
+
+## 2026-07-07（文档：评估并补充“帮你选”天气穿衣建议需求）
+
+根据用户提出的“帮你选”功能设想，评估其与当前桌宠项目路线的匹配度，并将需求写入 `docs/plan.md`。
+
+**评估结论：**
+- 该需求可行且与“关系型 AI 电子宠物”的产品定位契合，适合体现宠物人格差异和日常陪伴价值。
+- 当前项目已有 Open-Meteo 天气服务、用户画像地区字段、宠物人格 Prompt、桌宠 2 字气泡与轻聊天窗口，具备实现基础。
+- 该需求不应回填到已完成的 Phase 2 桌宠 MVP，也不属于远期 Phase 4 多端扩展；更适合放入 **Phase 3：桌宠体验增强 + 养成体系**，作为主动提醒能力中的中等偏上优先级“快赢”项。
+
+**更新内容：**
+- 在 `docs/plan.md` Phase 3 Deliverables 中新增“天气穿衣建议（\"帮你选\"）”。
+- 明确根据用户画像城市或本次指定城市查询次日天气，并由当前宠物按自身人格生成穿衣建议。
+- 明确 Hot Dog 等热情型宠物可积极夸赞推荐搭配，Cold Cat 等傲娇型宠物可表达“只是建议，爱穿不穿”，自定义宠物按性格标签、口头禅和特殊习惯生成语气。
+- 明确桌宠端通过 2 字气泡（如“穿衣”“帮选”“带伞”）低敏触发，点击后展开完整建议；Web 端可通过聊天快捷入口或日常分享触发。
+- 补充城市缺失时不编造地点，应提示用户补充城市或设置画像地区。
+- 补充实现约束：优先复用或抽取主动关怀服务，由服务层校验城市和天气参数，不信任 LLM 文本参数。
+- 在 Phase 3 Acceptance Criteria 中新增对应验收标准。
+
+本次仅更新规划文档，未修改业务代码。
+
+---
+
+## 2026-07-06（修复：daily_share 空白消息防护）
+
+**问题：** Electron 桌宠轻聊天窗口中，当后端返回的 `daily_share` 对象有 `role` 字段但 `content` 为 `undefined` 时，会渲染一条空白的 assistant 消息气泡；Web 聊天主界面也仅判断 `response.daily_share` 是否存在，缺少同类防护。
+
+**根因：** `desktop/renderer/chat.js` 的 `sendMessage` 中曾存在冗余的第三条件分支：当 `daily_share.content === undefined && daily_share.role` 成立时，调用 `appendMessage('assistant', '', 'proactive')`，将空字符串作为消息内容渲染到界面上；`frontend/js/app.js` 则在 `daily_share` 对象存在但 `content` 缺失时仍会添加主动消息。
+
+**修复：** Electron 端删除冗余的第三条件分支，仅保留 `if (result?.daily_share?.content)` 判断；Web 端同步将 `if (response.daily_share)` 改为 `if (response.daily_share?.content)`，确保只有 `content` 为真值时才渲染轻提醒消息。
+
+**改动文件：**
+- `desktop/renderer/chat.js`
+- `frontend/js/app.js`
+
+---
+
+## 2026-07-06（功能：Phase 2 Electron 桌宠 MVP）
+
+根据 `docs/plan.md` 当前优先级，落地产品转型 Phase 2 桌宠 MVP，新增本地 Electron 桌宠工程，验证桌面常驻陪伴闭环。
+
+**更新内容：**
+- 新增 `desktop/` Electron 工程，包含主进程、预加载桥接、桌宠渲染页、轻聊天渲染页、开发/打包脚本与 README。
+- 桌宠窗口支持透明、无边框、置顶、跳过任务栏和宠物图片拖拽；点击宠物或 2 字气泡可打开轻聊天窗口。
+- 轻聊天窗口通过 Electron IPC 由主进程调用现有 FastAPI 后端，完成输入、思考态、回复展示和消息历史加载。
+- 新增 2 字低敏桌面提醒气泡规则，仅基于时间段、后端宠物状态、最近互动时间和勿扰模式生成「找你」「想你」「等待」「困了」「陪学」等概括，不读取屏幕或敏感应用内容。
+- 新增托盘/右键菜单：显示桌宠、打开完整 Web 面板、切换勿扰、切换预设宠物、退出。
+- 启动时检测本地后端 `8080` / `10000` 端口；未发现时尝试在项目根目录执行 `python main.py` 自动拉起，失败时给出日志路径提示。
+- 桌宠通过 Electron `userData/config.json` 持久化 `user_id/session_id/pet_type/dnd`，并由 `preload_web.js` 注入 Web 面板 localStorage，使桌宠和 Web 共用同一后端会话与记忆。
+- 修复桌宠与轻聊天窗口启动时并发初始化会话导致后端 `users.user_id` 唯一约束冲突的问题，通过主进程串行化 `ensureSession()` 避免重复创建同一用户会话。
+- 更新 `.gitignore` 忽略桌面端依赖、构建产物和运行日志；更新 `docs/plan.md` 将 Phase 2 标记为 MVP 已实现。
+
+**验证：**
+- ✅ `node --check` 检查 `desktop/main.js`、`desktop/preload*.js`、`desktop/renderer/*.js` 通过。
+- ✅ `python -m compileall backend main.py` 通过。
+- ✅ `npm install` 成功生成桌面端依赖锁文件。
+- ✅ `npm run dist -- --dir` 成功输出未打包目录 `desktop/dist/win-unpacked`，验证 Electron 工程可构建。
+- ⚠️ `npm install` 报告依赖树存在 10 个 high severity audit 项，主要来自 Electron/electron-builder 开发依赖，MVP 暂不强制升级破坏性版本。
+
+---
+
+## 2026-07-06（文档：精简 docs 目录并同步核心文档）
+
+根据用户希望保留“需求计划文档、bug 文档、项目介绍文档”的目标，清理 `docs/` 目录中过期、重复或非项目文档，并同步更新核心文档内容。
+
+**更新内容：**
+- 重写 `docs/README.md`，将项目定位从“QQ 智能宠物伴侣”更新为“个人 AI 电子宠物伴侣”，补充当前功能、技术栈、页面/API、项目结构、演示建议、路线和安全部署注意事项。
+- 更新 `docs/plan.md`，将当前优先级从 Phase 1 调整为 Phase 2 桌宠 MVP，并修正已实现 Phase 1 后仍残留的旧实施建议。
+- 重写压缩 `docs/bug.md`，只保留仍需处理的 Open / Partial 项，将已修复 VIS / EMO / LEARN / 主安全问题统一归档，避免旧状态误导后续开发。
+- 删除已被核心文档吸收或明显过期的 `docs/QAgent_Pet_需求实现文档.md`、`docs/产品转型方向文档.md`、`docs/demo.md`。
+- 删除未跟踪且不属于项目文档的 `docs/简历总结.md`。
+
+本次仅更新和清理文档，未修改业务代码。
+
+---
+
+## 2026-07-06（仓库清理：删除无用本地 worktree 分支）
+
+根据用户要求，清理 `.claude/worktrees/` 下由 Agent 创建的临时 worktree 及其对应的本地分支，避免本地仓库残留无意义的空分支。
+
+**更新内容：**
+- 删除本地分支：
+  - `worktree-agent-a313c288b6e62d14f`
+  - `worktree-agent-a6d2aee0986c331e8`
+  - `worktree-agent-a920bd3c2dd51d452`
+- 同步移除对应的 `.claude/worktrees/agent-*` 工作树目录。
+- 运行 `git worktree prune` 清理已移除工作树的引用。
+
+**验证：**
+- ✅ `git branch -a` 只剩 `master`、`memory-optimization` 及远程跟踪分支。
+- ✅ `git worktree list` 只剩当前主工作树。
+- ✅ 保留未跟踪文件 `docs/简历总结.md` 不动（用户表示不需要同步）。
+
+---
+
+## 2026-07-03（文档：归档当前已实现需求）
+
+根据用户要求，按 `docs/plan.md` 现有“已实现需求：xxx。”归档格式，将当前已经完成的 Phase 1 Web 端电子宠物化 / 软件化 MVP 补充到已实现需求归档中。
+
+**更新内容：**
+- 在 `docs/plan.md` 的“已实现需求归档”中新增：`已实现需求：产品转型 Phase 1 Web 端电子宠物化 / 软件化 MVP。`
+- 保留后续 Phase 2 桌宠 MVP、Phase 3 桌宠体验增强、Phase 4 QQ/IM/移动端扩展等未实现需求的详细规划。
+- 未修改业务代码。
+
+---
+
+## 2026-07-03（功能：Phase 1 Web 端电子宠物化 / 软件化 MVP）
+
+根据 `docs/plan.md` 当前优先级，落地产品转型 Phase 1 的 Web 端软件化 MVP：把聊天主界面升级为桌面软件式宠物控制中心，并补齐宠物状态、轻养成和桌宠预览入口。
+
+**更新内容：**
+- 后端新增 `GET /api/sessions/{session_id}/pet-status`，从 `pet_sessions`、`messages`、`learning_sessions` 与 `user_profiles` 聚合派生宠物状态和轻养成数据。
+- 宠物状态支持 `idle / happy / lonely / sleepy / studying`，优先结合学习中状态、休息时段、最近互动时间、今日互动次数、亲密度和最近情绪信号进行规则判定。
+- 轻养成数据新增今日互动次数、今日陪伴时长粗估、连续互动天数、亲密度和关系等级，供 Web 与未来桌宠端复用。
+- 新增共享 App Shell：`frontend/js/shell.js` 与 `frontend/css/shell.css`，提供左侧固定导航栏、顶部软件栏、勿扰模式本地开关和桌宠预览入口。
+- `frontend/chat.html` 重构为桌面软件式三栏布局：左侧固定导航、中间聊天主区、右侧宠物状态/轻养成/亲密度/模拟控制/陪我学侧栏；保留原有聊天、串门、记忆档案元素 ID 以兼容 `app.js`。
+- `frontend/js/app.js` 新增 `loadPetStatus()`，在初始化、发送消息和模拟时间后刷新宠物状态、状态动画、情绪趋势和轻养成面板。
+- 新增桌宠预览页 `frontend/desktop_pet.html` 与 `frontend/css/desktop_pet.css`，用图片 + CSS 动画展示未来透明置顶桌宠、2 字轻气泡和点击展开完整聊天的产品方向。
+- 新增桌宠设置页 `frontend/settings.html` 与 `frontend/css/settings.css`，提供勿扰模式、托盘/通知、开机自启、数据目录、版本信息等桌面软件概念入口。
+- 首页、自定义宠物页、陪我学页接入共享 App Shell，并将文案从“QQ 智能宠物伴侣 Agent”调整为“桌面电子宠物伙伴”叙事。
+- `docs/plan.md` 将 Phase 1 Web 端电子宠物化 / 软件化 MVP 标记为已实现，后续真实托盘/通知/开机自启能力留给 Electron 桌宠阶段。
+
+**验证：**
+- ✅ `python -m py_compile backend/schemas.py backend/routers/sessions.py main.py` 通过。
+- ✅ `node --check frontend/js/api.js frontend/js/app.js frontend/js/shell.js` 通过。
+- ✅ `import main` 成功，确认 `/api/sessions/{session_id}/pet-status` 路由已注册。
+
+---
+
+## 2026-07-03（文档：压缩 plan.md 已实现需求）
+
+根据用户要求，保留 `docs/plan.md` 中未实现和部分实现的需求，将已实现需求压缩为“已实现需求：xxx。”格式，并删除对应详细实现路径，以降低计划文档体积。
+
+**更新内容：**
+- 将口头禅概率控制、自定义宠物持久化/删除/开场白 LLM 生成、宠物串门、情绪感知两层架构、陪你学 GitHub 项目、情感捕捉细化等已实现需求统一归档到“已实现需求归档”。
+- 删除 `[2026-06-30] 情感捕捉细化` 的详细设计、后端实现路径、测试策略和开放问题，保留为已实现需求。
+- 将产品转型计划中的 Phase 0 标记为已实现，后续路线从 Phase 1 开始推进。
+- 保留未实现/部分实现需求：Web 主界面软件化、宠物状态完善、轻养成面板、桌宠模式入口、桌宠 MVP、桌宠体验增强、QQ/IM/移动端扩展。
+- 删除已实现 Phase 0 相关风险和实施建议，保留仍与后续桌宠/Web 软件化相关的风险与建议。
+
+本次仅更新规划文档，未修改业务代码。
+
+---
+
+## 2026-07-03（文档：补充桌面软件化交付与前端软件化需求）
+
+根据用户提出的“最终是桌宠形式，是否需要像微信桌面端一样把前端界面改成桌面软件界面”的需求判断，补充桌宠产品最终交付形态与前端改造方向。
+
+**更新内容：**
+- 在 `docs/plan.md` 的产品转型阶段化落地计划中新增“本地桌面软件交付形态与 HTML 前端软件化”需求。
+- 明确最终产品不应要求用户直接保存源码项目、安装依赖并手动运行，而应以安装包/可执行程序形式交付。
+- 明确保留现有 HTML/CSS/JavaScript 技术路线，不为桌面端盲目重写原生 UI；后续可由 Electron / Tauri 桌面壳加载现有前端资源。
+- 明确需要改造的是“界面形态”而不是“HTML 文件格式”：Web 前端应从普通网页聊天界面升级为桌面软件式主窗口 / 宠物控制中心。
+- 在 Phase 1 中补充 Web 主界面软件化交付物：左侧固定导航、主内容区、右侧宠物状态/记忆侧栏、桌宠设置、托盘/通知/勿扰等桌面端概念入口。
+- 在 Phase 2 中补充桌面端工程目标：主软件窗口加载软件化后的 Web 前端，桌宠小窗口加载轻量桌宠页面，最终面向用户交付安装包/可执行程序。
+
+本次仅更新规划文档，未修改业务代码。
+
+---
+
+## 2026-07-01（文档：补充桌宠桌面情境气泡需求）
+
+根据用户提出的“宠物和用户在桌面情况交互，可采用气泡形式弹出回复以及问候”想法，评估后认为该交互与桌宠常驻陪伴形态高度契合，适合作为桌宠 MVP 的核心体验之一。
+
+**更新内容：**
+- 在 `docs/plan.md` 的 Phase 2「桌宠 MVP」中新增并细化“桌面情境提醒气泡（MVP 轻量版）”。
+- 明确气泡只承担“提醒宠物发消息了/想互动”的提示职责，不直接呈现完整回复内容。
+- 气泡文案采用 2 个字左右的极短概括，用于表达宠物当前心情或本次消息主题，例如“找你”“想你”“等待”“无聊”“鼓励”“提醒”。
+- 明确用户点击气泡或宠物后再展开完整聊天面板，查看完整问候、回复或主动关怀内容。
+- 将可用桌面情境信号限定为低敏信息：当前时间段、最近互动时间、后端情感趋势、学习状态、勿扰模式。
+- 明确 MVP 不读取屏幕内容、聊天窗口内容或敏感应用内容，避免隐私风险和复杂度过早上升。
+- 验收标准新增：桌面提醒气泡只展示 2 个字左右的心情/主题概括，不直接展示完整消息内容，点击后可展开完整聊天面板。
+- 风险表新增“桌面情境提醒气泡过度打扰或引发隐私担忧”，缓解措施为 2 字概括、频率控制、勿扰模式和隐私边界。
+
+**优先级判断：** 放入 **Phase 2：桌宠 MVP**，因为“桌面提醒气泡 + 点击展开完整聊天”是桌宠最小闭环（桌面常驻 + 轻提示 + 气泡聊天 + 主动陪伴）的关键交互；更复杂的应用感知、多屏适配、隐私设置细化可留到 Phase 3。
+
+本次仅更新规划文档，未修改业务代码。
+
+---
+
+## 2026-07-01（优化：压制 MiniMax-M2.7 thinking 块，给 text 回复留足预算）
+
+**背景：** 修复 token budget 后 LLM 仍偶发"只有 thinking 没有 text"。用户希望只要 text 块、不要 thinking 块。经实测排查定论。
+
+**实测结论（对 MiniMax-M2.7 / `https://api.minimaxi.com/anthropic/v1/messages` Anthropic 兼容端点）：**
+- thinking 块是模型内置行为，**无法用任何请求参数完全关闭**。所有被接受的参数下 `content` 始终为 `['thinking','text']`。
+- 各参数实测 thinking 块长度：`chat_template_kwargs.enable_thinking=False` ≈44（最短）｜`reasoning_effort=none` ≈90｜baseline ≈98｜`reasoning_effort=low` ≈1166（反常最长）｜Anthropic 标准 `thinking:false` → 400 invalid params。
+- 代码本身早就在丢弃 thinking 块（`llm_service.py` 只取 `type=="text"`），"输出层不要 thinking"早已满足；真正问题是 thinking 吃光 `max_tokens` 导致 text 来不及产出。
+
+**改动（A+B 叠加）：**
+- A（前次已改）：`main_chat`/`tool_feedback` 显式 `max_tokens=2000`。
+- B（本次）：`llm_service.py` `_call_llm` 在 payload 增加 `chat_template_kwargs={"enable_thinking": False}`（仅当 model 含 `MiniMax-M2` 时），把思考压到最短，给 text 留更多预算、降延迟降成本。
+
+**验证：** 重启服务启动正常，待前端重发消息观察是否仍出现 `No text block found`。
+
+---
+
+## 2026-07-01（修复：MiniMax-M2.5 thinking 耗尽 token budget 导致 LLM 返回空、走兜底回复）
+
+**问题：** 修复 SQL 占位符后聊天接口返回 200，但日志反复出现 `[main_chat] No text block found in content (token budget likely exhausted)` 与 `[proactive_hot_dog] ...`，用户实际看到的是兜底文案而非真实 LLM 回复，"没调用成功"。
+
+**根因：** 模型为 `MiniMax-M2.5`（带 extended thinking）。该模型在 `content` 列表里先放 thinking 块、再放 text 块。当 `max_tokens` 偏小（`main_chat`/`tool_feedback` 用默认 500），整段预算被 thinking 吃光，text 块来不及产出即触顶，`stop_reason=max_tokens`，`content` 里只有 thinking、没有 text → `_call_llm` 遍历找不到 `type=="text"` 块 → 返回 None → 路由走 `fallback_replies` 兜底。
+
+**修复：**
+- `backend/routers/chat.py:700` `main_chat` 调用显式传 `max_tokens=2000`（原走默认 500）。
+- `backend/routers/chat.py:457` `tool_feedback` 同样传 `max_tokens=2000`（原走默认 500，同类长 prompt 同样风险）。
+- `backend/services/llm_service.py` `_call_llm` 在「找不到 text 块」告警时补打 `stop_reason` 与 `usage`，便于后续快速判定是 budget 耗尽还是其他结构异常。
+
+**验证：** 重启服务，待前端重发消息后观察日志是否仍出现 `No text block found`。
+
+---
+
+## 2026-07-01（修复：messages 表 INSERT 占位符缺失导致聊天 500）
+
+**问题：** 前端发送聊天消息时 `POST /api/sessions/{id}/chat` 返回 500 Internal Server Error，后台报 `sqlite3.OperationalError: 9 values for 10 columns`。
+
+**根因：** `backend/services/memory_service.py` 的 `save_message` 中，`INSERT INTO messages` 列出 10 个列（`message_id, session_id, role, content, emotion_tag, is_proactive, emotional_need, emotion_intensity, risk_level, created_at`），但 `VALUES` 子句只写了 9 个占位符 `?`（少了 1 个），传入 10 个参数与占位符数不匹配。Phase 0 情感捕捉新增的 `emotional_need/emotion_intensity/risk_level` 三列由 `database.py` 的 ALTER TABLE 迁移正常添加，列存在，问题纯粹是占位符少写。
+
+**修复：** 在 VALUES 中补齐为 10 个占位符 `?, ?, ?, ?, ?, ?, ?, ?, ?, ?`。
+
+**验证：** 重启 `main.py`，数据库初始化正常，Uvicorn 监听 `http://0.0.0.0:8080` 正常启动。
+
+---
+
+## 2026-07-01（功能：Phase 0 情感捕捉细化落地）
+
+实现 `docs/plan.md` 中 `[2026-06-30] Plan for 情感捕捉细化` 与 `[2026-07-01] 产品转型阶段化落地` 的 Phase 0，将主 LLM 结构化输出从两字段升级为五字段，新增情感需求/强度/风险维度，并接入亲密度计算、安全回应与记忆压缩。
+
+**1. 文档重构：**
+- `docs/plan.md`：将已完成的 `[2026-06-17] 情绪感知两层架构重构` 详细计划替换为一行「需求：情绪感知两层架构重构已实现。」，删除其实现路径描述，保持 plan.md 只承载待实现需求。
+
+**2. 主 LLM 结构化输出升级（`backend/routers/chat.py`）：**
+- 新增 `parse_emotional_reply(raw)` 返回 `EmotionalReply` 对象，五字段 `reply/emotion/need/intensity/risk_level`；三层兜底（直接 JSON 解析 → 正则提取最外层 JSON → 纯文本原文）；兼容旧两字段格式（缺字段走安全默认 `need=unknown/intensity=1/risk_level=none`）；非法值降级（`emotion`→neutral、`need`→unknown、`intensity` 钳到 1-5、`risk_level`→none）。
+- 保留 `parse_structured_reply()` 旧接口作为兼容垫片，内部委托 `parse_emotional_reply`。
+- `full_prompt` 与工具路径 `second_prompt` 末尾均改为要求输出五字段 JSON，并强调这些字段是系统内部判断、不得在 `reply` 里告诉用户"你现在是某某情绪"。
+- 工具路径 `execute_tools_and_build_final_prompt` 返回值从 `(str, dict, str)` 改为 `(str, dict, EmotionalReply)`；首轮与工具路径情感字段做协调覆盖（工具路径给出有意义字段才覆盖首轮）。
+
+**3. 亲密度计算改造（`backend/routers/chat.py`）：**
+- `calculate_intimacy_change(emotion, need, intensity)` 从只看 `emotion_tag` 升级为结合三维度：sad/anxious 基础分更高、陪伴/倾诉/认可/鼓励/安抚类需求加成、高强度情感加成，上限 3。
+
+**4. 高风险安全回应策略（`backend/routers/chat.py`）：**
+- 新增 `generate_safe_crisis_reply(pet_type, pet_name)`：`risk_level=high` 时在安全规则约束下重新生成回复，保持宠物人格但优先安全、不开玩笑、引导联系现实可信任的人/紧急求助、声明本产品非专业心理咨询；LLM 失败时返回固定安全模板。
+- chat 主流程在解析出 `risk_level=high` 后调用该函数覆盖回复，并将 `need` 标记为 `crisis_support`。
+
+**5. MoodAgent 结构化趋势升级（`backend/services/mood_agent.py`）：**
+- `analyze_mood_tendency` 从输出 20 字简单倾向升级为结构化 JSON：`mood_tendency/dominant_emotion/dominant_need/suggested_support_style`。
+- `mood_tendency` 仍写入 `user_profiles`（schema 唯一支持字段），其余字段记录到日志供后续主动关怀策略扩展。
+- 解析失败时退回旧版纯文本兜底，异常仍不影响主响应路径。
+
+**6. messages 表情感字段落库（`backend/database.py` + `backend/services/memory_service.py`）：**
+- `messages` 表新增 `emotional_need TEXT`、`emotion_intensity INTEGER`、`risk_level TEXT` 三列，采用与 `user_profiles` 相同的 `ALTER TABLE` + 忽略 "duplicate column name" 的兼容迁移范式（幂等）。
+- `memory_service.save_message` 签名扩展新增三参数，INSERT 同步落库；chat 主流程在保存 assistant 消息时传入本轮情感字段。
+
+**7. 记忆压缩保留情感事件（`backend/services/llm_service.py`）：**
+- `compress_memory` Prompt 增加要求：保留用户重要情绪事件、情感支持偏好、压力来源与有效安抚方式；情感类记忆 `importance` 适当提高，降低被时间衰减影响的速度。
+
+**验证结果：**
+- ✅ `python -m py_compile` 全量文件语法检查通过（chat/mood_agent/memory_service/llm_service/database）
+- ✅ `import main` 导入无误
+- ✅ `parse_emotional_reply` 单测覆盖：新格式完整提取、旧两字段兼容、JSON 前后带冗余文字正则提取、纯文本 fallback、非法 emotion/need/intensity/risk 降级、空/None 兜底
+- ✅ `calculate_intimacy_change` 单测覆盖：sad+venting+4→3、neutral+unknown+1→1、happy+celebration+2→1、anxious+calming+5→3
+- ✅ 数据库迁移幂等：临时库与真实库均成功新增三列，重复执行不报错
+- ✅ 前端零改动（`ChatResponse` 不变，新字段仅内部落库不暴露给前端）
+
+---
+
+## 2026-07-01（文档：产品转型阶段化落地计划）
+
+根据产品转型方向文档与当前需求计划，在 `docs/plan.md` 中新增 `[2026-07-01] Plan for 产品转型阶段化落地`。
+
+本次仅更新规划文档，未修改业务代码。
+
+**规划重点：**
+- 将产品主线明确为「个人 AI 电子宠物伴侣」，现有 FastAPI 后端作为统一的 `QAgent Pet Core`
+- 明确 Web 端继续作为完整功能中心，桌宠端作为下一阶段重点入口，QQ/IM 降级为远期可选扩展
+- 梳理总体路线：Phase 0 情感捕捉细化 → Phase 1 产品定位调整与 Web 宠物化 → Phase 2 桌宠 MVP → Phase 3 桌宠体验增强与养成体系 → Phase 4 多端扩展
+- 为每个阶段补充目标、交付物、涉及模块和验收标准
+- 明确阶段依赖、优先级、关键风险与缓解措施
+- 提出实施建议：先落地情感结构化，桌宠不重写后端，MVP 不过早引入 Live2D，数据迁移放到桌宠稳定后推进
+
+---
+
+## 2026-06-30（文档：产品转型方向）
+
+根据当前产品方向讨论，新增 `docs/产品转型方向文档.md`，用于记录 QAgent Pet 从「QQ 内部聊天宠物」拓展为「个人 AI 电子宠物伴侣」的转型方向。
+
+本次仅新增规划文档，未修改业务代码。
+
+**文档重点：**
+- 明确当前仅围绕 QQ Bot 推进会限制现有 Web 端能力展示，且与豆包等通用 AI 助手差异化不足
+- 将产品主线调整为「个人 AI 电子宠物伴侣」，QQ / IM 接入降级为远期可选入口
+- 保留现有 Web 端作为完整功能中心，承载宠物选择、自定义宠物、完整聊天、记忆面板、陪我学、串门和设置管理
+- 新增桌宠端方向，定位为常驻桌面的轻量陪伴入口，负责透明置顶宠物、气泡聊天、主动提醒、动画状态和托盘菜单
+- 梳理与通用 AI 助手的差异化：从工具型 AI 转向关系型 AI 电子宠物
+- 拆解后续需求方向：桌宠基础能力、宠物状态系统、动画表现、轻养成、主动陪伴、情绪陪伴、陪学桌宠化和串门桌宠化
+- 给出阶段路线：产品定位调整 → Web 端电子宠物化 → 桌宠 MVP → 桌宠体验增强
+
+---
+
+## 2026-06-30（文档：情感捕捉细化规划）
+
+根据产品方向讨论，在 `docs/plan.md` 中新增 `[2026-06-30] Plan for 情感捕捉细化（不在前端显式展示用户心情）`。
+
+本次仅更新规划文档，未修改业务代码。
+
+**规划重点：**
+- 明确产品约束：不在前端显式展示“用户当前心情状态”，避免用户产生被贴标签或被诊断的奇怪感
+- 将情感理解定位为后端内部决策信号，用于优化宠物回复、记忆沉淀、主动关怀和亲密度计算
+- 规划将当前 `reply + emotion` 结构升级为 `reply + emotion + need + intensity + risk_level`
+- 新增情感需求维度 `need`，覆盖陪伴、倾诉、认可、鼓励、建议、安抚、转移注意力、庆祝、梳理、危机支持等场景
+- 规划基础风险等级 `risk_level`，为自伤/极端负面等高风险表达预留安全回应策略
+- 明确前端不做心情标签展示，仅可在未来考虑低干扰自然语言入口，如“想吐槽一下”“想被鼓励一下”
+- 拆解后端实施方向：结构化解析升级、Prompt 更新、可选落库字段、MoodAgent 结构化趋势、情感记忆压缩、安全策略和测试方案
+
+---
+
+## 2026-06-25（Bug 修复：LLM API 调用错误）
+
+### 问题分析
+通过日志发现三处 LLM 调用错误：
+
+1. **`main_chat` ReadTimeout** — `chat.py:565`，MiniMax-M2.7 扩展思考模型处理完整 prompt 超过 30s 默认超时，导致主对话返回 fallback 文本。
+2. **`user_profile_agent` ReadTimeout** — `user_profile_agent.py:57`，用户画像提取 30s 超时，且该调用在聊天主流程中同步 `await`，直接阻塞响应。
+3. **`mood_agent` No text block** — `mood_agent.py:74`，`max_tokens=200` 过小，思考 token 消耗完毕后无剩余 token 输出文本。
+
+### 修复内容
+
+**`backend/routers/chat.py`：**
+- `main_chat` 超时从默认 30s 改为 90s
+- `user_profile_agent` 调用从同步阻塞改为 `background_tasks.add_task`，不再阻塞聊天响应
+
+**`backend/services/mood_agent.py`：**
+- `max_tokens` 从 200 改为 800，确保 extended thinking 模型思考后仍有 token 输出文本
+
+**`backend/services/user_profile_agent.py`：**
+- `_call_llm` 增加 `timeout=90.0` 参数
+
+---
+
+## 2026-06-22（Bug 修复：串门功能与自定义宠物头像）
+
+### 串门功能三处修复
+
+**1. 结束按钮在自动轮次期间被禁用（`frontend/js/app.js`）：**
+- `runAutoVisitTurns` 原来把 `endBtn.disabled = true`，6 轮全部跑完才解禁，用户无法中途结束
+- 改为保留 endBtn 可点击状态，改用 `_visitAborted` 中断标志，点击结束按钮立即终止循环并结束串门
+
+**2. LLM token budget 耗尽导致串门消息为空（`backend/services/cross_pet_service.py`）：**
+- 模型 `MiniMax-M2.7` 为推理模型，会先生成 thinking 块，`max_tokens=200`（visit_turn）和 `max_tokens=300`（visit_summary）远不够用，thinking 消耗全部 token 后无文本输出
+- 将两处 `max_tokens` 均提升至 1024
+
+**3. 自定义宠物 ID 格式不匹配 UUID 校验（`backend/routers/visits.py`）：**
+- 自定义宠物 ID 格式为 `custom_XXXXXXXX`，而 `start_visit` 对非预置 guest 调用了 `_validate_uuid()`，UUID 正则无法匹配该格式，直接返回 400
+- 新增 `_validate_pet_id()` 函数，同时接受标准 UUID 和 `custom_XXXXXXXX` 格式
+
+### 自定义宠物头像显示 emoji 而非图片（`frontend/index.html`）
+
+- `selectCustomPet` 函数未存储 `qagent_custom_pet`（含 `pet_type`），导致 `app.js` 中 `rawPetType` 为空，`getPetPresetImage` 找不到对应图片，fallback 到 emoji
+- `selectCustomPet` 新增 `rawPetType` 参数，进入会话时同步写入 `qagent_custom_pet`；对应 onclick 调用处同步传入 `pet.pet_type`
+
+---
+
 ## 2026-06-20（安全修复：陪你学功能漏洞审查与修复）
 
 调用 bug 检查 agent 对 `docs/plan.md` 中「情绪感知两层架构」与「宠物陪你学」两需求的实现做安全审查，新增漏洞记录于 `docs/bug.md` 的「陪你学功能（learning）新增漏洞追踪」章节（3 High + 3 Medium + 3 Low），并完成以下修复：

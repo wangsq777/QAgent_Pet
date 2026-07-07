@@ -24,6 +24,46 @@ class LLMService:
         self.base_url = settings.LLM_BASE_URL
         self.model = settings.LLM_MODEL
 
+    def _strip_thought_fields(self, text: str) -> str:
+        """
+        从 LLM 返回中剥离 thought / reasoning 思考字段。
+
+        策略：
+        1. 优先尝试 JSON 解析：若整体是 JSON 对象，删除 thought/reasoning 键后
+           重新序列化剩余字段，避免正则误删合法内容。
+        2. JSON 解析失败时，退回保守正则：仅匹配字符串起始位置的顶层
+           {"thought": ...} / {"reasoning": ...} 对象，不做跨结构贪婪匹配。
+        """
+        if not text:
+            return text
+
+        stripped = text.strip()
+        # 仅当看起来像 JSON 对象时才尝试解析，减少无谓异常
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict):
+                    # 仅当确实存在思考字段时才改写，否则原样返回（避免重排键序）
+                    if any(k.lower() in ("thought", "reasoning") for k in data.keys()):
+                        for k in list(data.keys()):
+                            if k.lower() in ("thought", "reasoning"):
+                                del data[k]
+                        # 重新序列化；保留 ensure_ascii=False 以兼容中文
+                        return json.dumps(data, ensure_ascii=False)
+                    return text
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        # 保守正则兜底：仅匹配字符串起始的顶层 thought/reasoning 对象
+        cleaned = re.sub(
+            r'^\s*\{\s*"(?:thought|reasoning)"\s*:.*?\}\s*',
+            '',
+            text,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE
+        )
+        return cleaned
+
     def _clean_response(self, text: Optional[str]) -> Optional[str]:
         if not text:
             return None
@@ -38,9 +78,9 @@ class LLMService:
         text = re.sub(r'The user asks[：:].*?(?=\n|$)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'So we have a user.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
 
-        # 清理 JSON 格式的思考内容：仅匹配顶层的 thought/reasoning 键，避免误删普通文本
-        text = re.sub(r'^\s*\{\s*"thought"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'^\s*\{\s*"reasoning"\s*:.*?\}', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # 清理 JSON 格式的思考内容：优先 JSON 解析删除 thought/reasoning 字段，
+        # 解析失败再退回保守正则兜底，避免正则误删合法 JSON 文本。
+        text = self._strip_thought_fields(text)
 
         # 清理多余的空白字符
         text = re.sub(r'\n{3,}', '\n\n', text)
@@ -83,6 +123,13 @@ class LLMService:
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
 
+        # MiniMax-M2.7 的 thinking 是模型内置行为，无法用参数完全关闭。
+        # chat_template_kwargs.enable_thinking=False 实测能把思考块压到最短
+        # (~44 字符 vs baseline ~98 / reasoning_effort=low ~1166)，给 text 块
+        # 留出更多预算，同时降低延迟与 token 消耗。仍会保留极短 thinking 块。
+        if "MiniMax-M2" in model:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+
         logger.debug("[%s] Calling LLM...", caller)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -104,7 +151,13 @@ class LLMService:
                             content = block.get("text")
                             break
                     if content is None:
-                        logger.warning("[%s] No text block found in content (token budget likely exhausted): %s", caller, str(content_list)[:200])
+                        stop_reason = data.get("stop_reason")
+                        usage = data.get("usage")
+                        logger.warning(
+                            "[%s] No text block found in content (token budget likely exhausted) "
+                            "stop_reason=%s usage=%s blocks=%s",
+                            caller, stop_reason, usage, str(content_list)[:200]
+                        )
                 # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
                 elif "choices" in data:
                     content = data["choices"][0]["message"]["content"]
@@ -255,10 +308,17 @@ class LLMService:
         conversation_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
         prompt = f"""以下是一段你和主人之间的对话记录，请压缩成200字以内的摘要，保留关键信息和重要细节。
 
+【压缩时优先保留】
+1. 用户的重要情绪事件（何时因何事产生了强烈情绪）。
+2. 用户表达过的情感支持偏好（更希望被陪伴/被倾听/被鼓励/被给建议等）。
+3. 用户的压力来源、情绪触发因素，以及之前被验证有效安抚他的方式。
+
 同时输出：
 1. summary: 对话摘要（200字以内）
 2. tags: 话题标签列表（如 ["weather", "sad", "work"]）
 3. importance: 重要性评分（0-1之间的小数，1表示非常重要）
+
+情感类记忆的 importance 应适当提高（如 0.8 以上），降低被时间衰减影响的速度。
 
 请用JSON格式输出：
 {{"summary": "摘要内容", "tags": ["标签1", "标签2"], "importance": 0.8}}

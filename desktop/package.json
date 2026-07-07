@@ -1,0 +1,69 @@
+{
+  "name": "qagent-pet-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QAgent Pet Electron desktop pet MVP",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "author": "QAgent Pet",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.qagent.pet",
+    "productName": "QAgent Pet",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "preload_web.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend",
+        "to": "frontend"
+      },
+      {
+        "from": "../backend",
+        "to": "backend"
+      },
+      {
+        "from": "../main.py",
+        "to": "main.py"
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "requirements.txt"
+      },
+      {
+        "from": "../.env.example",
+        "to": ".env.example"
+      }
+    ],
+    "extraMetadata": {
+      "main": "main.js"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QAgent Pet 轻聊天</title>
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <main class="chat-shell">
+    <header class="chat-header">
+      <div>
+        <span class="kicker">桌宠轻聊天</span>
+        <h1 id="petTitle">QAgent Pet</h1>
+      </div>
+      <div class="header-actions">
+        <button id="dndToggle" type="button">勿扰：关</button>
+        <button id="openWeb" type="button">完整面板</button>
+      </div>
+    </header>
+
+    <section id="messages" class="messages" aria-live="polite"></section>
+
+    <div id="thinking" class="thinking" hidden>
+      <span></span><span></span><span></span>
+    </div>
+
+    <form id="chatForm" class="input-area">
+      <textarea id="messageInput" rows="2" maxlength="2000" placeholder="和桌宠说点什么... Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="sendBtn" type="submit">发送</button>
+    </form>
+  </main>
+
+  <script src="chat.js"></script>
+</body>
+</html>

@@ -1,11 +1,11 @@
 import uuid
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from backend.database import get_db
-from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse, UserProfileUpdateRequest
+from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse, UserProfileUpdateRequest, PetStatusResponse
 from backend.services.llm_service import llm_service
 from backend.services.memory_service import memory_service
 from backend import prompts
@@ -35,10 +35,46 @@ def get_intimacy_level(intimacy: int) -> str:
         return "挚友"
 
 
+def _parse_datetime(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
+    except (ValueError, TypeError):
+        return None
+
+
+def _count_consecutive_days(active_dates: set, now: datetime) -> int:
+    if not active_dates:
+        return 0
+
+    today = now.date()
+    yesterday = today - timedelta(days=1)
+    if today in active_dates:
+        cursor_date = today
+    elif yesterday in active_dates:
+        cursor_date = yesterday
+    else:
+        return 0
+
+    streak = 0
+    while cursor_date in active_dates:
+        streak += 1
+        cursor_date -= timedelta(days=1)
+    return streak
+
+
 @router.post("", response_model=SessionResponse)
 @limiter.limit("10/minute")
 async def create_session(body: SessionCreateRequest, request: Request):
-    user_id = body.user_id
+    # 身份以 AuthMiddleware 写入 request.state.user_id（X-User-Id 头）为准，
+    # 请求体中的 user_id 不再可信，仅保留字段以兼容旧前端调用
+    user_id = request.state.user_id
     pet_type = body.pet_type
     custom_pet_id = body.custom_pet_id
 
@@ -118,15 +154,15 @@ async def create_session(body: SessionCreateRequest, request: Request):
         from backend.prompts.custom_pet import generate_welcome_messages
         from backend.routers.chat import get_custom_pet_info
 
-        # 从数据库获取自定义宠物配置
-        custom_pet_info = await get_custom_pet_info(custom_pet_id)
+        # 从数据库获取自定义宠物配置（带 user_id 归属校验，防止越权读取他人宠物）
+        custom_pet_info = await get_custom_pet_info(custom_pet_id, user_id)
         if custom_pet_info:
             pet_name = custom_pet_info["pet_name"]
-            # 需要更多字段来生成欢迎语，查完整记录
+            # 需要更多字段来生成欢迎语，查完整记录（同样带 user_id 归属校验）
             async with get_db() as db:
                 cursor = await db.execute(
-                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ?",
-                    (custom_pet_id,)
+                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                    (custom_pet_id, user_id)
                 )
                 row = await cursor.fetchone()
             if row:
@@ -187,6 +223,159 @@ async def get_session(session_id: str, request: Request):
             raise HTTPException(status_code=403, detail="Access denied")
 
         return session_dict
+
+
+@router.get("/{session_id}/pet-status", response_model=PetStatusResponse)
+@limiter.limit("60/minute")
+async def get_pet_status(session_id: str, request: Request):
+    """返回 Web/未来桌宠共用的派生宠物状态与轻养成数据。"""
+    _validate_uuid(session_id, "session_id")
+    now = datetime.now()
+    today = now.date().isoformat()
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM pet_sessions WHERE session_id = ?",
+            (session_id,)
+        )
+        session = await cursor.fetchone()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session_dict = dict(session)
+        if session_dict.get("user_id") != request.state.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        pet_type = session_dict["pet_type"]
+        pet_id_for_learning = session_dict.get("custom_pet_id") if pet_type == "custom" else pet_type
+        active_learning = 0
+        if pet_id_for_learning:
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM learning_sessions
+                WHERE user_id = ? AND pet_id = ? AND status = 'active'
+                """,
+                (session_dict["user_id"], pet_id_for_learning)
+            )
+            row = await cursor.fetchone()
+            active_learning = row["count"] if row else 0
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM messages
+            WHERE session_id = ? AND role = 'user' AND DATE(created_at) = ?
+            """,
+            (session_id, today)
+        )
+        today_row = await cursor.fetchone()
+        today_interactions = today_row["count"] if today_row else 0
+
+        cursor = await db.execute(
+            """
+            SELECT MIN(created_at) AS first_at, MAX(created_at) AS last_at
+            FROM messages
+            WHERE session_id = ? AND DATE(created_at) = ?
+            """,
+            (session_id, today)
+        )
+        today_window = await cursor.fetchone()
+        first_today = _parse_datetime(today_window["first_at"] if today_window else None)
+        last_today = _parse_datetime(today_window["last_at"] if today_window else None)
+        if first_today and last_today:
+            window_minutes = max(0, int((last_today - first_today).total_seconds() // 60))
+            companion_minutes_today = min(480, max(window_minutes, today_interactions * 2))
+        else:
+            companion_minutes_today = 0
+
+        cursor = await db.execute(
+            """
+            SELECT DISTINCT DATE(created_at) AS active_day
+            FROM messages
+            WHERE session_id = ? AND role = 'user'
+            ORDER BY active_day DESC
+            LIMIT 30
+            """,
+            (session_id,)
+        )
+        active_rows = await cursor.fetchall()
+        active_dates = set()
+        for row in active_rows:
+            try:
+                active_dates.add(datetime.fromisoformat(row["active_day"]).date())
+            except (ValueError, TypeError):
+                continue
+        consecutive_days = _count_consecutive_days(active_dates, now)
+
+        cursor = await db.execute(
+            """
+            SELECT emotion_tag
+            FROM messages
+            WHERE session_id = ? AND emotion_tag IS NOT NULL AND emotion_tag != ''
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id,)
+        )
+        emotion_row = await cursor.fetchone()
+        recent_emotion = (emotion_row["emotion_tag"] if emotion_row else "") or ""
+
+        cursor = await db.execute(
+            "SELECT mood_tendency FROM user_profiles WHERE user_id = ?",
+            (session_dict["user_id"],)
+        )
+        profile_row = await cursor.fetchone()
+        mood_tendency = profile_row["mood_tendency"] if profile_row else None
+
+    last_interaction = _parse_datetime(session_dict.get("last_interaction_at"))
+    minutes_since_interaction = None
+    if last_interaction:
+        minutes_since_interaction = max(0, int((now - last_interaction).total_seconds() // 60))
+
+    intimacy = session_dict.get("intimacy") or 0
+    total_chats = session_dict.get("total_chats") or 0
+    raw_pet_status = session_dict.get("pet_status") or "normal"
+
+    if active_learning > 0:
+        status = "studying"
+        status_label = "学习中"
+        status_reason = "正在陪你学项目"
+    elif raw_pet_status == "hiding":
+        status = "sleepy"
+        status_label = "休息中"
+        status_reason = "它暂时躲起来恢复能量"
+    elif now.hour >= 23 or now.hour < 7:
+        status = "sleepy"
+        status_label = "困困的"
+        status_reason = "现在是休息时段"
+    elif minutes_since_interaction is not None and minutes_since_interaction >= 24 * 60 and total_chats > 0:
+        status = "lonely"
+        status_label = "想你了"
+        status_reason = "已经一天没有互动"
+    elif recent_emotion in {"happy", "excited"} or (today_interactions >= 3 and intimacy > 50):
+        status = "happy"
+        status_label = "开心陪伴"
+        status_reason = "今天互动让它很有精神"
+    else:
+        status = "idle"
+        status_label = "待机陪伴"
+        status_reason = "随时等你来聊天"
+
+    return PetStatusResponse(
+        status=status,
+        status_label=status_label,
+        status_reason=status_reason,
+        today_interactions=today_interactions,
+        companion_minutes_today=companion_minutes_today,
+        consecutive_days=consecutive_days,
+        intimacy=intimacy,
+        intimacy_level=get_intimacy_level(intimacy),
+        total_chats=total_chats,
+        mood_tendency=mood_tendency,
+        last_interaction_at=last_interaction.isoformat() if last_interaction else None
+    )
 
 
 async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:

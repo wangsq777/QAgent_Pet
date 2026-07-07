@@ -157,6 +157,19 @@ async def init_database():
                     logger.error("Migration failed: %s — %s", col_sql, e)
                     raise
 
+        # 扩展 messages 表：情感捕捉 Phase 0 新增 need/intensity/risk_level
+        for col_sql in [
+            "ALTER TABLE messages ADD COLUMN emotional_need TEXT",
+            "ALTER TABLE messages ADD COLUMN emotion_intensity INTEGER",
+            "ALTER TABLE messages ADD COLUMN risk_level TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception as e:
+                if "duplicate column name" not in str(e).lower():
+                    logger.error("Migration failed: %s — %s", col_sql, e)
+                    raise
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS pet_visits (
                 visit_id          TEXT PRIMARY KEY,

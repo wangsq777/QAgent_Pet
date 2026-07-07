@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QAgent Pet 桌宠</title>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <main class="pet-shell" id="petShell" aria-label="QAgent Pet 桌宠">
+    <button class="bubble" id="petBubble" type="button" title="点击展开聊天" hidden>找你</button>
+    <button class="pet-button" id="petButton" type="button" title="点击展开轻聊天，右键使用菜单">
+      <img id="petImage" class="pet-image" alt="QAgent Pet">
+      <span id="petMood" class="pet-mood">待机</span>
+    </button>
+    <div id="backendHint" class="backend-hint" hidden></div>
+  </main>
+
+  <script src="pet.js"></script>
+</body>
+</html>

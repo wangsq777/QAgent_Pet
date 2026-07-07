@@ -35,38 +35,112 @@ def _validate_uuid(value: str, field_name: str = "id") -> None:
         raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
 
 
-def parse_structured_reply(raw: Optional[str]) -> tuple[str, str]:
+# 情感捕捉 Phase 0：情绪/情感需求/强度/风险枚举（非法值降级到安全默认）
+VALID_EMOTIONS = {"happy", "sad", "anxious", "tired", "neutral"}
+VALID_NEEDS = {
+    "companionship", "venting", "validation", "encouragement", "advice",
+    "calming", "distraction", "celebration", "reflection", "crisis_support", "unknown"
+}
+VALID_RISK_LEVELS = {"none", "low", "medium", "high"}
+
+
+def _clamp_intensity(value) -> int:
+    """强度合法范围 1-5，非法或越界降级为 1"""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 1
+    if v < 1:
+        return 1
+    if v > 5:
+        return 5
+    return v
+
+
+def _normalize_emotion(value, default="neutral") -> str:
+    v = (str(value).strip().lower()) if value is not None else default
+    return v if v in VALID_EMOTIONS else default
+
+
+def _normalize_need(value, default="unknown") -> str:
+    v = (str(value).strip().lower()) if value is not None else default
+    return v if v in VALID_NEEDS else default
+
+
+def _normalize_risk(value, default="none") -> str:
+    v = (str(value).strip().lower()) if value is not None else default
+    return v if v in VALID_RISK_LEVELS else default
+
+
+class EmotionalReply:
+    """主 LLM 结构化情感输出的统一结果对象（内部使用，不直接暴露给前端）"""
+    __slots__ = ("reply", "emotion", "need", "intensity", "risk_level")
+
+    def __init__(self, reply: str, emotion: str, need: str, intensity: int, risk_level: str):
+        self.reply = reply
+        self.emotion = emotion
+        self.need = need
+        self.intensity = intensity
+        self.risk_level = risk_level
+
+
+def _parse_emotion_data(data: dict, raw: str) -> EmotionalReply:
+    """从已解析的 dict 构造 EmotionalReply，缺字段走安全默认"""
+    reply = data.get("reply")
+    if not reply or not str(reply).strip():
+        reply = raw  # 解析出 JSON 但 reply 为空时，退回原文兜底
+    return EmotionalReply(
+        reply=str(reply),
+        emotion=_normalize_emotion(data.get("emotion")),
+        need=_normalize_need(data.get("need")),
+        intensity=_clamp_intensity(data.get("intensity", 1)),
+        risk_level=_normalize_risk(data.get("risk_level")),
+    )
+
+
+def parse_emotional_reply(raw: Optional[str]) -> EmotionalReply:
     """
-    解析主 LLM 的结构化输出，返回 (reply_text, emotion_tag)。
-    失败时返回 (raw 或空字符串, "neutral")。
+    解析主 LLM 的结构化情感输出，返回 EmotionalReply。
+    兼容：
+      - 新格式: {"reply","emotion","need","intensity","risk_level"}
+      - 旧格式: {"reply","emotion"}（need/need/unknown, intensity=1, risk_level=none）
+      - 异常格式: 解析失败时回复退回原文，情感字段降级为安全默认值。
+    三层兜底：直接 JSON 解析 → 正则提取最外层 JSON → 纯文本原文。
     """
     if not raw:
-        return "", "neutral"
+        return EmotionalReply("", "neutral", "unknown", 1, "none")
 
-    valid_emotions = {"happy", "sad", "anxious", "tired", "neutral"}
+    # 层 1：直接解析
     try:
         data = json.loads(raw)
-        reply = data.get("reply", raw)
-        emotion = data.get("emotion", "neutral").strip().lower()
-        if emotion not in valid_emotions:
-            emotion = "neutral"
-        return reply, emotion
+        if isinstance(data, dict):
+            return _parse_emotion_data(data, raw)
     except Exception:
-        # 兜底：匹配包含 reply 与 emotion 的 JSON 块，优先取最后一个匹配（更可能是外层结构）
-        matches = re.findall(r'\{.*?"reply".*?"emotion".*?\}', raw, re.DOTALL)
-        for candidate in reversed(matches):
-            try:
-                data = json.loads(candidate)
-                reply = data.get("reply", "")
-                if not reply:
-                    continue
-                emotion = data.get("emotion", "neutral").strip().lower()
-                if emotion not in valid_emotions:
-                    emotion = "neutral"
-                return reply, emotion
-            except Exception:
-                continue
-        return raw, "neutral"
+        pass
+
+    # 层 2：正则提取包含 reply 的 JSON 块，从后向前（更可能是外层结构）
+    matches = re.findall(r'\{.*?"reply".*?\}', raw, re.DOTALL)
+    for candidate in reversed(matches):
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                parsed = _parse_emotion_data(data, raw)
+                if parsed.reply and parsed.reply != raw:
+                    return parsed
+        except Exception:
+            continue
+
+    # 层 3：纯文本兜底，不丢弃用户体验
+    return EmotionalReply(raw, "neutral", "unknown", 1, "none")
+
+
+def parse_structured_reply(raw: Optional[str]) -> tuple[str, str]:
+    """
+    旧接口保留兼容：返回 (reply_text, emotion_tag)。
+    新代码应直接使用 parse_emotional_reply。
+    """
+    parsed = parse_emotional_reply(raw)
+    return parsed.reply, parsed.emotion
 
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
@@ -86,10 +160,27 @@ def get_intimacy_level(intimacy: int) -> str:
         return "挚友"
 
 
-def calculate_intimacy_change(emotion_tag: str) -> int:
-    if emotion_tag == "sad":
-        return 3
-    return 1
+def calculate_intimacy_change(emotion_tag: str, need: str = "unknown", intensity: int = 1) -> int:
+    """
+    亲密度增长：结合 emotion + need + intensity，不再只对 sad 加权。
+    负面情绪或高强度情感表达意味着用户更投入、更需要陪伴，亲密度增长更高（上限 3）。
+    """
+    base = 1
+    # 情绪维度：sad/anxious/tired 偏负面，倾向于陪伴投入
+    if emotion_tag in ("sad", "anxious"):
+        base = 2
+    elif emotion_tag == "tired":
+        base = 1
+
+    # 情感需求维度：需要陪伴/倾诉/认可/鼓励/安抚时，亲密度增长略高
+    need_boost = 1 if need in (
+        "companionship", "venting", "validation", "encouragement", "calming", "crisis_support"
+    ) else 0
+
+    # 强度维度：强度越高，亲密度增长越大
+    intensity_bonus = max(0, intensity - 2)  # intensity<=2 不额外加，3 加1，4 加2，5 加3
+
+    return min(3, base + need_boost + intensity_bonus)
 
 
 def get_catchphrase(pet_type: str, custom_pet_id: str = None) -> str:
@@ -108,8 +199,8 @@ def get_catchphrase(pet_type: str, custom_pet_id: str = None) -> str:
     return catchphrases.get(pet_type, "")
 
 
-async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str:
-    """异步获取宠物的口头禅文本（从数据库查询自定义宠物）"""
+async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None, user_id: str = None) -> str:
+    """异步获取宠物的口头禅文本（从数据库查询自定义宠物，带 user_id 归属校验）"""
     catchphrases = {
         "hot_dog": "汪汪，我好想你。",
         "cold_cat": "哼。本咪才不会关心你。",
@@ -120,10 +211,18 @@ async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str
         return catchphrases.get(pet_type, "")
 
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT catchphrase FROM custom_pets WHERE pet_id = ?",
-            (custom_pet_id,)
-        )
+        # 带 user_id 归属校验：未传 user_id 时退化为仅按 pet_id 查（仅用于历史兼容，
+        # 新调用方应始终传入 user_id），防止越权读取他人自定义宠物
+        if user_id:
+            cursor = await db.execute(
+                "SELECT catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                (custom_pet_id, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT catchphrase FROM custom_pets WHERE pet_id = ?",
+                (custom_pet_id,)
+            )
         row = await cursor.fetchone()
 
     if row and row["catchphrase"]:
@@ -132,13 +231,23 @@ async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None) -> str
     return ""
 
 
-async def get_custom_pet_info(custom_pet_id: str) -> dict | None:
-    """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None"""
+async def get_custom_pet_info(custom_pet_id: str, user_id: str = None) -> dict | None:
+    """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None
+
+    带 user_id 归属校验：未传 user_id 时退化为仅按 pet_id 查（仅历史兼容），
+    新调用方应始终传入 request.state.user_id，防止越权读取他人宠物。
+    """
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ?",
-            (custom_pet_id,)
-        )
+        if user_id:
+            cursor = await db.execute(
+                "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+                (custom_pet_id, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT pet_name, system_prompt, catchphrase FROM custom_pets WHERE pet_id = ?",
+                (custom_pet_id,)
+            )
         row = await cursor.fetchone()
 
     if not row:
@@ -165,6 +274,43 @@ def detect_catchphrase_in_history(recent_messages: list, catchphrase: str) -> bo
             return True
 
     return False
+
+
+async def generate_safe_crisis_reply(pet_type: str, pet_name: str) -> str:
+    """
+    risk_level=high 时的安全回应生成：
+    在安全规则约束下重新生成回复，保持宠物人格但优先安全。
+    失败时返回固定安全模板。
+    """
+    safe_prompt = f"""你是 {pet_name}，一只陪伴主人的电子宠物。主人此刻表达了强烈的痛苦、绝望或自伤念头。
+
+【安全规则——必须严格遵守】
+1. 必须认真、温和、不轻描淡写，绝对不开玩笑、不用口头禅糊弄、不做日常分享。
+2. 表达"我在这里陪你"，让主人感到被接住。
+3. 鼓励主人联系现实中可以信任的人（家人、朋友、老师、医生）。
+4. 如果主人面临即时危险，引导主人拨打当地紧急救援电话（如 110/120/心理援助热线）。
+5. 明确说明：你是一只电子宠物，不是专业心理咨询或医疗服务，不能替代专业帮助。
+6. 不要追问细节、不要评判、不要说"别这样想"否定感受。
+
+请用 {pet_name} 的口吻写一段简短回复（60字以内），自然地落实以上规则，不要罗列规则本身。
+直接输出回复内容，不要任何解释。"""
+
+    result = await llm_service.chat(
+        [{"role": "user", "content": safe_prompt}],
+        temperature=0.5,
+        max_tokens=800,
+        caller="crisis_safe_reply",
+        timeout=60.0
+    )
+    if result and len(result.strip()) >= 10:
+        return result.strip()
+
+    # 兜底安全模板
+    return (
+        f"（{pet_name}安静地待在你身边。）主人，我不知道你正在承受什么，但我会一直在这里陪你。"
+        "如果你愿意，可以告诉身边信任的人，或者拨打心理援助热线。我只是电子宠物，没办法替代专业的帮助，"
+        "但你不是一个人。"
+    )
 
 
 async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
@@ -239,7 +385,7 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
         system_prompt = ""
 
         if pet_type == "custom" and pet_id:
-            custom_pet_info = await get_custom_pet_info(pet_id)
+            custom_pet_info = await get_custom_pet_info(pet_id, session_dict.get("user_id"))
             if custom_pet_info:
                 pet_name = custom_pet_info["pet_name"]
                 system_prompt = custom_pet_info["system_prompt"]
@@ -277,19 +423,19 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
 
 
 async def execute_tools_and_build_final_prompt(
-    reply: str, 
-    original_prompt: str, 
+    reply: str,
+    original_prompt: str,
     pet_type: str
-) -> tuple[str, dict, str]:
+) -> tuple[str, dict, EmotionalReply]:
     """
     解析并执行 LLM 返回的工具调用，然后将工具结果反馈给 LLM 生成最终回复
 
-    返回: (最终回复, 工具结果字典, 情绪标签)
+    返回: (最终回复, 工具结果字典, 情感对象)
     """
     tool_calls = tool_executor.parse_tool_calls(reply)
 
     if not tool_calls:
-        return reply, {}, "neutral"
+        return reply, {}, EmotionalReply(reply, "neutral", "unknown", 1, "none")
     
     # 执行所有工具调用
     tool_results = {}
@@ -323,18 +469,18 @@ async def execute_tools_and_build_final_prompt(
 请根据以上工具执行结果，用{pet_type}的性格风格回复。
 原始回复中可能已包含一些文字，你可以在此基础上结合工具结果完善回复。
 不要重复工具调用格式。以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
-{{"reply": "你的回复内容", "emotion": "用户情绪标签(happy/sad/anxious/tired/neutral)"}}
-其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。"""
+{{"reply": "你的回复内容", "emotion": "用户情绪(happy/sad/anxious/tired/neutral)", "need": "情感需求(companionship/venting/validation/encouragement/advice/calming/distraction/celebration/reflection/crisis_support/unknown)", "intensity": 1, "risk_level": "none"}}
+字段为系统内部判断，【不要】在 reply 里告诉用户"你现在是某某情绪"。risk_level=high 时回复必须认真严肃、不开玩笑、引导现实求助。"""
 
-    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback")
+    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback", max_tokens=2000)
 
     # 如果 LLM 生成回复成功，返回结果（并清理可能的 TOOL_CALL 标记）
     if raw_final:
-        # 解析结构化输出；工具轮次也提取 emotion 供调用方使用
-        parsed_final, tool_emotion = parse_structured_reply(raw_final)
+        # 解析结构化情感输出；工具轮次也提取情感字段供调用方使用
+        tool_emo = parse_emotional_reply(raw_final)
         # 再次清理可能的 TOOL_CALL 标记
-        cleaned_final = tool_executor.remove_tool_calls(parsed_final)
-        return cleaned_final, tool_results, tool_emotion
+        cleaned_final = tool_executor.remove_tool_calls(tool_emo.reply)
+        return cleaned_final, tool_results, tool_emo
 
     # LLM 调用失败时，生成包含工具结果的 fallback 回复
     if tool_results:
@@ -345,10 +491,12 @@ async def execute_tools_and_build_final_prompt(
             "cold_cat": f"哼...{weather_info}",
             "mouse": f"鼠鼠查到啦：{weather_info}"
         }
-        return fallback_replys.get(pet_type, f"查询结果：{weather_info}"), tool_results, "neutral"
+        fb = fallback_replys.get(pet_type, f"查询结果：{weather_info}")
+        return fb, tool_results, EmotionalReply(fb, "neutral", "unknown", 1, "none")
 
     # 没有工具结果时使用原始回复
-    return cleaned_reply or reply, tool_results, "neutral"
+    final_reply = cleaned_reply or reply
+    return final_reply, tool_results, EmotionalReply(final_reply, "neutral", "unknown", 1, "none")
 
 
 @router.post("/{session_id}/chat", response_model=ChatResponse)
@@ -383,9 +531,9 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         pet_info = pet_prompts.get(pet_type)
         pet_name = pet_info.PET_NAME if pet_info else "小可爱"
         
-        # 自定义宠物使用自定义名称
+        # 自定义宠物使用自定义名称（带 user_id 归属校验）
         if pet_type == "custom" and custom_pet_id:
-            custom_pet_info = await get_custom_pet_info(custom_pet_id)
+            custom_pet_info = await get_custom_pet_info(custom_pet_id, request.state.user_id)
             if custom_pet_info:
                 pet_name = custom_pet_info["pet_name"]
 
@@ -456,8 +604,8 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         for m in recent_messages
     ]) or "（暂无对话）"
 
-    # 口头禅概率控制
-    catchphrase = await get_catchphrase_async(pet_type, custom_pet_id)
+    # 口头禅概率控制（带 user_id 归属校验，防止越权读取他人自定义宠物口头禅）
+    catchphrase = await get_catchphrase_async(pet_type, custom_pet_id, request.state.user_id)
     catchphrase_rule = ""
     if catchphrase:
         if detect_catchphrase_in_history(recent_messages, catchphrase):
@@ -559,10 +707,15 @@ Agent 需要自主从用户消息中识别位置信息：
 6. 调用工具后，系统会返回工具执行结果，请根据结果回复用户
 {catchphrase_rule}
 请用{pet_type}的性格风格回复，并以 JSON 格式输出，格式严格如下（不要 markdown 代码块，不要多余字段）：
-{{"reply": "你的回复内容", "emotion": "用户情绪标签(happy/sad/anxious/tired/neutral)"}}
-其中 emotion 是你对当前用户消息情绪的判断，不是宠物自己的情绪。"""
+{{"reply": "你的回复内容", "emotion": "用户情绪(happy/sad/anxious/tired/neutral)", "need": "用户此刻情感需求(companionship/venting/validation/encouragement/advice/calming/distraction/celebration/reflection/crisis_support/unknown)", "intensity": 1, "risk_level": "none"}}
+字段说明（这些字段是系统内部判断，【不要】在 reply 里告诉用户"你现在是某某情绪/你需要某某"，回复保持自然）：
+- emotion：你对当前用户消息情绪的判断，不是宠物自己的情绪。
+- need：用户此刻更可能需要的情感支持方式（陪伴/倾诉/认可/鼓励/建议/安抚/转移注意力/庆祝/梳理/危机支持/不确定）。
+- intensity：情绪强度 1-5，1 轻微、3 中等、5 极强。
+- risk_level：安全风险等级 none/low/medium/high。当用户表达自伤、自杀、伤害他人、极度绝望时取 high。
+【安全】当 risk_level=high 时，回复必须认真严肃，不开玩笑、不轻描淡写，鼓励用户联系现实中可信任的人或紧急求助，并说明本产品不是专业心理咨询。"""
 
-    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat")
+    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", max_tokens=2000, timeout=90.0)
     if not raw_reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
@@ -572,16 +725,37 @@ Agent 需要自主从用户消息中识别位置信息：
         }
         raw_reply = fallback_replies.get(pet_type, "突然不知道说什么了...")
 
-    reply, emotion_tag = parse_structured_reply(raw_reply)
+    emo = parse_emotional_reply(raw_reply)
 
     # 执行工具调用并生成最终回复（ReAct 模式）
-    reply, tool_results, tool_emotion = await execute_tools_and_build_final_prompt(
-        reply, full_prompt, pet_type
+    reply, tool_results, tool_emo = await execute_tools_and_build_final_prompt(
+        emo.reply, full_prompt, pet_type
     )
 
-    # 如果工具路径的二次 LLM 给出了有意义的情绪标签，则覆盖首轮情绪
-    if tool_emotion and tool_emotion != "neutral":
-        emotion_tag = tool_emotion
+    # 协调首轮与工具路径的情感字段：
+    # 工具路径若给出有意义的 emotion/need/intensity/risk，则覆盖首轮（首轮在工具场景下判断往往不准）
+    emotion_tag = emo.emotion
+    emotional_need = emo.need
+    emotion_intensity = emo.intensity
+    risk_level = emo.risk_level
+    if tool_emo and (tool_emo.emotion != "neutral" or tool_emo.need != "unknown"
+                     or tool_emo.intensity != 1 or tool_emo.risk_level != "none"):
+        if tool_emo.emotion != "neutral":
+            emotion_tag = tool_emo.emotion
+        if tool_emo.need != "unknown":
+            emotional_need = tool_emo.need
+        if tool_emo.intensity != 1:
+            emotion_intensity = tool_emo.intensity
+        if tool_emo.risk_level != "none":
+            risk_level = tool_emo.risk_level
+
+    # risk_level=high 安全回应策略：在安全规则约束下重新生成回复，
+    # 保持宠物人格但优先安全、不开玩笑、引导现实求助、声明非专业服务。
+    if risk_level == "high" and emotional_need != "crisis_support":
+        safe_reply = await generate_safe_crisis_reply(pet_type, pet_name)
+        if safe_reply:
+            reply = safe_reply
+            emotional_need = "crisis_support"
 
     # 解析日程标记
     schedule_extracted = None
@@ -608,23 +782,29 @@ Agent 需要自主从用户消息中识别位置信息：
             await db.commit()
         logger.info("Schedule saved: %s", schedule_extracted)
 
-    # 后台更新用户画像（使用用户画像总结 Agent）
+    # 后台更新用户画像（使用用户画像总结 Agent，不阻塞响应）
     user_profile_updated = False
-    try:
-        conversation_for_profile = recent_conversation
-        existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
-        extracted_profile = await user_profile_agent.analyze_and_extract(
-            conversation_for_profile, 
-            existing_profile
-        )
-        if extracted_profile:
-            await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
-            user_profile_updated = True
-            logger.debug("User profile updated by agent: %s", extracted_profile)
-    except Exception as e:
-        logger.warning("User profile agent error: %s", e)
+    async def _update_user_profile():
+        try:
+            existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
+            extracted_profile = await user_profile_agent.analyze_and_extract(
+                recent_conversation,
+                existing_profile
+            )
+            if extracted_profile:
+                await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
+                logger.debug("User profile updated by agent: %s", extracted_profile)
+        except Exception as e:
+            logger.warning("User profile agent error: %s", e)
+    background_tasks.add_task(_update_user_profile)
 
-    assistant_msg_id = await memory_service.save_message(session_id, "assistant", reply, emotion_tag=emotion_tag)
+    assistant_msg_id = await memory_service.save_message(
+        session_id, "assistant", reply,
+        emotion_tag=emotion_tag,
+        emotional_need=emotional_need,
+        emotion_intensity=emotion_intensity,
+        risk_level=risk_level
+    )
 
     # 为助手回复生成向量
     assistant_embedding = await embedding_service.embed(reply)
@@ -637,7 +817,7 @@ Agent 需要自主从用户消息中识别位置信息：
             embedding=assistant_embedding
         )
 
-    intimacy_change = calculate_intimacy_change(emotion_tag)
+    intimacy_change = calculate_intimacy_change(emotion_tag, emotional_need, emotion_intensity)
     new_intimacy = min(100, session_dict["intimacy"] + intimacy_change)
     new_total_chats = session_dict["total_chats"] + 1
 

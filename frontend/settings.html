@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>桌宠设置 - QAgent Pet</title>
+    <link rel="stylesheet" href="css/shell.css?v=1">
+    <link rel="stylesheet" href="css/styles.css?v=4">
+    <link rel="stylesheet" href="css/settings.css?v=1">
+</head>
+<body>
+    <main class="settings-page">
+        <header class="settings-header">
+            <span class="eyebrow">桌面软件概念入口</span>
+            <h1>桌宠与本地软件设置</h1>
+            <p>这些选项用于提前验证桌宠交互语义。真正的托盘、开机自启和本地数据目录会在 Electron 桌宠 MVP 中接入。</p>
+        </header>
+
+        <section class="settings-grid">
+            <article class="setting-card primary-card">
+                <h2>桌宠模式</h2>
+                <p>预览未来透明置顶桌宠窗口、轻气泡提醒与点击展开完整聊天的交互。</p>
+                <a class="setting-action" href="desktop_pet.html">打开桌宠预览</a>
+            </article>
+
+            <article class="setting-card">
+                <h2>勿扰模式</h2>
+                <p>开启后，未来桌宠主动提醒会静默；当前 Web 端会保存此偏好。</p>
+                <button id="dnd-setting-btn" class="setting-toggle">勿扰：关</button>
+            </article>
+
+            <article class="setting-card">
+                <h2>托盘与通知</h2>
+                <p>关闭到托盘、系统通知、气泡频率控制将在桌宠 MVP 中启用。</p>
+                <span class="setting-badge">即将接入 Electron</span>
+            </article>
+
+            <article class="setting-card">
+                <h2>开机自启</h2>
+                <p>桌宠增强阶段会提供开机自启与上次位置恢复。</p>
+                <span class="setting-badge">Phase 3</span>
+            </article>
+
+            <article class="setting-card">
+                <h2>数据目录</h2>
+                <p>当前开发模式仍使用项目内 SQLite；桌宠阶段会迁移到用户应用数据目录。</p>
+                <code>%APPDATA%/QAgentPet/</code>
+            </article>
+
+            <article class="setting-card">
+                <h2>版本信息</h2>
+                <p>QAgent Pet Core + Web 控制中心。</p>
+                <strong>Web Phase 1</strong>
+            </article>
+        </section>
+    </main>
+
+    <script src="js/shell.js?v=1"></script>
+    <script>
+        initAppShell('settings');
+        const btn = document.getElementById('dnd-setting-btn');
+        const sync = () => {
+            const enabled = localStorage.getItem('qagent_dnd_mode') === 'true';
+            btn.textContent = enabled ? '勿扰：开' : '勿扰：关';
+            btn.classList.toggle('enabled', enabled);
+        };
+        btn.addEventListener('click', () => {
+            const enabled = localStorage.getItem('qagent_dnd_mode') === 'true';
+            localStorage.setItem('qagent_dnd_mode', String(!enabled));
+            sync();
+        });
+        sync();
+    </script>
+</body>
+</html>

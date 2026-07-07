@@ -250,10 +250,11 @@ async def get_custom_pet(pet_id: str, request: Request):
     """
     获取自定义宠物详情
     """
+    user_id = request.state.user_id
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT * FROM custom_pets WHERE pet_id = ?",
-            (pet_id,)
+            "SELECT * FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+            (pet_id, user_id)
         )
         row = await cursor.fetchone()
 
@@ -272,8 +273,8 @@ async def update_custom_pet(pet_id: str, body: CustomPetCreateRequest, request: 
     user_id = request.state.user_id
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT * FROM custom_pets WHERE pet_id = ?",
-            (pet_id,)
+            "SELECT * FROM custom_pets WHERE pet_id = ? AND user_id = ?",
+            (pet_id, user_id)
         )
         row = await cursor.fetchone()
 
@@ -321,14 +322,14 @@ async def update_custom_pet(pet_id: str, body: CustomPetCreateRequest, request: 
 
     async with get_db() as db:
         await db.execute(
-            """UPDATE custom_pets SET 
+            """UPDATE custom_pets SET
                pet_name=?, pet_type=?, personality_tags=?, catchphrase=?,
                special_habits=?, avatar_url=?, system_prompt=?, updated_at=?
-               WHERE pet_id=?""",
+               WHERE pet_id=? AND user_id=?""",
             (body.pet_name, body.pet_type,
              json.dumps(body.personality_tags, ensure_ascii=False),
              catchphrase, body.special_habits or "",
-             body.avatar_url or "", system_prompt, now, pet_id)
+             body.avatar_url or "", system_prompt, now, pet_id, user_id)
         )
         await db.commit()
 

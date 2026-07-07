@@ -26,6 +26,7 @@ class ChatApp {
         this.renderPetInfo();
         this.updateIntimacy(this.intimacy);
         this.loadHistoryMessages();
+        this.loadPetStatus();
         this.bindEvents();
         this.initVisitFeature();
     }
@@ -181,6 +182,7 @@ class ChatApp {
             // 从后端同步亲密度和累计对话到侧边栏
             this.updateIntimacy(sessionResponse.intimacy);
             this.updateTotalChats(memoryData.total_chats);
+            this.loadPetStatus();
             
             const response = messagesResponse;
             // 检查历史消息中是否已有欢迎消息（由后端 create_session 保存的）
@@ -327,7 +329,7 @@ class ChatApp {
             });
 
             // 处理日常分享消息
-            if (response.daily_share) {
+            if (response.daily_share?.content) {
                 this.addMessage({
                     role: 'assistant',
                     content: response.daily_share.content,
@@ -338,6 +340,7 @@ class ChatApp {
 
             this.updateIntimacy(response.intimacy);
             this.updateTotalChats(response.total_chats);
+            this.loadPetStatus();
 
             if (response.schedule_extracted) {
                 this.showNotification(`📅 已记录日程: ${response.schedule_extracted.content}`);
@@ -401,6 +404,7 @@ class ChatApp {
                 document.getElementById('pet-status').textContent = '在线陪伴';
                 document.getElementById('pet-status').className = 'pet-status normal';
             }
+            this.loadPetStatus();
 
         } catch (error) {
             alert('模拟失败: ' + error.message);
@@ -413,6 +417,63 @@ class ChatApp {
     showLoading(show) {
         const loading = document.getElementById('loading-indicator');
         loading.style.display = show ? 'flex' : 'none';
+    }
+
+    async loadPetStatus() {
+        if (!this.sessionId || !window.API?.getPetStatus) return;
+        try {
+            const data = await API.getPetStatus(this.sessionId);
+            const status = data.status || 'idle';
+            const label = data.status_label || '待机陪伴';
+            const reason = data.status_reason || '随时等你来聊天';
+
+            const statusEl = document.getElementById('pet-status');
+            if (statusEl) {
+                statusEl.textContent = label;
+                statusEl.className = `pet-status normal status-${status}`;
+            }
+
+            const avatarEl = document.getElementById('pet-emoji');
+            if (avatarEl) {
+                avatarEl.classList.remove('status-idle', 'status-happy', 'status-lonely', 'status-sleepy', 'status-studying');
+                avatarEl.classList.add(`status-${status}`);
+            }
+
+            const labelEl = document.getElementById('pet-state-label');
+            const reasonEl = document.getElementById('pet-state-reason');
+            const dotEl = document.getElementById('pet-state-dot');
+            const moodEl = document.getElementById('pet-state-mood');
+            if (labelEl) labelEl.textContent = label;
+            if (reasonEl) reasonEl.textContent = reason;
+            if (dotEl) dotEl.textContent = this.getStatusIcon(status);
+            if (moodEl) {
+                moodEl.textContent = data.mood_tendency
+                    ? `近期倾向：${data.mood_tendency}`
+                    : '情绪趋势会在多轮互动后自动沉淀。';
+            }
+
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = value;
+            };
+            setText('today-interactions', data.today_interactions ?? 0);
+            setText('companion-minutes', data.companion_minutes_today ?? 0);
+            setText('consecutive-days', data.consecutive_days ?? 0);
+            setText('growth-intimacy-level', data.intimacy_level || this.getIntimacyLevel(this.intimacy));
+        } catch (error) {
+            console.warn('加载宠物状态失败:', error);
+        }
+    }
+
+    getStatusIcon(status) {
+        const icons = {
+            idle: '🐾',
+            happy: '✨',
+            lonely: '💭',
+            sleepy: '🌙',
+            studying: '📚'
+        };
+        return icons[status] || '🐾';
     }
 
     syncIntimacyRing(intimacy) {
@@ -735,13 +796,15 @@ class ChatApp {
         const interjectionInput = document.getElementById('visit-interjection-input');
 
         nextBtn.disabled = true;
-        endBtn.disabled = true;
         this.visitIsLoading = true;
+        this._visitAborted = false;
+
+        endBtn.onclick = () => { this._visitAborted = true; this.endVisit(); };
 
         let guestTurn = true;
 
         for (let i = 0; i < maxTurns; i++) {
-            if (!this.currentVisitId) break;
+            if (!this.currentVisitId || this._visitAborted) break;
 
             const interjection = (i === 0 && interjectionInput.value.trim()) ? interjectionInput.value.trim() : '';
             if (i === 0) interjectionInput.value = '';
@@ -775,8 +838,9 @@ class ChatApp {
 
         loadingEl.style.display = 'none';
         this.visitIsLoading = false;
+        this._visitAborted = false;
         nextBtn.disabled = false;
-        endBtn.disabled = false;
+        this.bindVisitControls();
     }
 
     async endVisit() {
