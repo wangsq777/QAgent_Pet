@@ -1,0 +1,152 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #fff9f2;
+  color: #3e3128;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  padding: 30px;
+}
+
+.setup-shell {
+  width: min(100%, 500px);
+  margin: 0 auto;
+}
+
+header {
+  margin-bottom: 26px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #ffe9db;
+  color: #d95f42;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+h1 {
+  margin: 14px 0 8px;
+  font-size: 30px;
+  letter-spacing: -0.04em;
+}
+
+header p,
+small {
+  color: #78685c;
+  line-height: 1.6;
+}
+
+form,
+label {
+  display: grid;
+  gap: 9px;
+}
+
+form {
+  gap: 18px;
+}
+
+label > span:first-child,
+.data-card strong {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+input {
+  width: 100%;
+  height: 44px;
+  border: 1.5px solid #e5d4c7;
+  border-radius: 13px;
+  padding: 0 13px;
+  background: #fff;
+  color: #3e3128;
+  font: inherit;
+  outline: none;
+}
+
+input:focus {
+  border-color: #ed795c;
+  box-shadow: 0 0 0 3px rgba(237, 121, 92, 0.13);
+}
+
+.password-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.quiet-button,
+.primary-button {
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.quiet-button {
+  padding: 0 14px;
+  background: #f0e7df;
+  color: #5e4d41;
+}
+
+.primary-button {
+  min-height: 48px;
+  padding: 0 20px;
+  background: #e76f51;
+  color: #fffaf5;
+  box-shadow: 0 10px 24px rgba(182, 76, 49, 0.2);
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.data-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #eadbd0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.data-card > div {
+  min-width: 0;
+}
+
+code {
+  display: block;
+  max-width: 340px;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #78685c;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  min-height: 20px;
+  margin: -4px 0;
+  color: #b3462e;
+  font-size: 13px;
+}
+
+.status.success {
+  color: #27846f;
+}

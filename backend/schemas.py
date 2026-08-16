@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 
 
@@ -108,6 +108,104 @@ class UserProfileUpdateRequest(BaseModel):
 class ErrorResponse(BaseModel):
     error_code: str
     message: str
+
+
+# ============ 主动陪伴 ============
+
+class ProactiveClaimRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=64)
+    timezone: str = Field("Asia/Shanghai", min_length=1, max_length=64)
+    client_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ProactiveActionRequest(BaseModel):
+    action: Literal["acknowledge", "snooze_10m", "snooze_1h", "complete", "dismiss", "disable_source_type"]
+    claim_token: Optional[str] = Field(None, max_length=128)
+    resolution_summary: Optional[str] = Field(None, max_length=500)
+
+
+class ProactiveReceiptRequest(BaseModel):
+    claim_token: Optional[str] = Field(None, max_length=128)
+
+
+class ProactiveSettingsRequest(BaseModel):
+    enabled: bool = True
+    timezone: str = Field("Asia/Shanghai", min_length=1, max_length=64)
+    timezone_policy: Literal["fixed_instant", "fixed_local"] = "fixed_instant"
+    quiet_start: str = Field("23:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    quiet_end: str = Field("08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    max_general_per_day: int = Field(1, ge=0, le=20)
+    min_interval_minutes: int = Field(120, ge=0, le=10080)
+    schedule_enabled: bool = True
+    concern_enabled: bool = True
+    emotion_followup_enabled: bool = False
+    inactivity_enabled: bool = True
+    pet_initiated_enabled: bool = True
+    privacy_level: Literal["generic", "topic"] = "generic"
+
+
+class ScheduleCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=200)
+    scheduled_at: Optional[datetime] = None
+    scheduled_at_utc: Optional[datetime] = None
+    timezone: str = Field("Asia/Shanghai", min_length=1, max_length=64)
+    reminder_offset_minutes: int = Field(0, ge=0, le=10080)
+    origin: Literal["chat_explicit", "chat_inferred", "manual", "calendar"] = "manual"
+
+
+class ScheduleUpdateRequest(BaseModel):
+    content: Optional[str] = Field(None, min_length=1, max_length=200)
+    scheduled_at: Optional[datetime] = None
+    scheduled_at_utc: Optional[datetime] = None
+    timezone: Optional[str] = Field(None, max_length=64)
+    status: Optional[Literal["pending", "completed", "cancelled", "needs_confirmation"]] = None
+    reminder_offset_minutes: Optional[int] = Field(None, ge=0, le=10080)
+
+
+class ScheduleCandidateConfirmRequest(BaseModel):
+    scheduled_at: datetime
+    timezone: Optional[str] = None
+
+
+class ConcernCreateRequest(BaseModel):
+    kind: Literal["future_event", "emotion", "unresolved_topic"]
+    subject: str = Field(..., min_length=1, max_length=120)
+    summary: str = Field("", max_length=500)
+    sensitivity: Literal["low", "medium", "high"] = "low"
+    consent_state: Literal["explicit", "confirmed", "pending", "denied"] = "pending"
+    next_followup_at_utc: Optional[datetime] = None
+    max_followups: int = Field(1, ge=0, le=5)
+
+
+class ConcernUpdateRequest(BaseModel):
+    subject: Optional[str] = Field(None, min_length=1, max_length=120)
+    summary: Optional[str] = Field(None, max_length=500)
+    next_followup_at_utc: Optional[datetime] = None
+    status: Optional[Literal["draft", "active", "snoozed", "resolved", "dismissed", "expired"]] = None
+    resolution_summary: Optional[str] = Field(None, max_length=500)
+
+
+# ============ 摸鱼中心 ============
+
+class LeisureSessionCreateRequest(BaseModel):
+    module_id: str = Field(..., min_length=1, max_length=100)
+    content_ref_id: Optional[str] = Field(None, max_length=100)
+
+
+class NovelProgressRequest(BaseModel):
+    chapter_id: Optional[str] = None
+    position: int = Field(0, ge=0)
+    percent: float = Field(..., ge=0, le=1)
+    content_version: str = Field(..., min_length=1, max_length=32)
+    client_updated_at_utc: datetime
+    request_id: str = Field(..., min_length=1, max_length=128)
+
+
+class LeisureSettingsRequest(BaseModel):
+    pet_interaction_enabled: bool = True
+    interaction_frequency: Literal["low", "normal", "high"] = "normal"
+    save_progress_enabled: bool = True
+    privacy_level: Literal["private", "generic"] = "private"
 
 
 # ============ 自定义宠物相关 Schema ============

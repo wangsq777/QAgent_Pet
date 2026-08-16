@@ -121,6 +121,102 @@ const API = {
         return await response.json();
     },
 
+    async getProactiveSettings() {
+        const response = await fetch(`${API_BASE}/proactive/settings`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取主动陪伴设置失败');
+        return await response.json();
+    },
+
+    async updateProactiveSettings(settings) {
+        const response = await fetch(`${API_BASE}/proactive/settings`, {
+            method: 'PUT', headers: buildHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(settings)
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '更新主动陪伴设置失败');
+        return await response.json();
+    },
+
+    async listSchedules(sessionId) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/schedules`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取日程失败');
+        return await response.json();
+    },
+
+    async listConcerns(sessionId) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/concerns`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取惦记事项失败');
+        return await response.json();
+    },
+
+    async confirmConcern(sessionId, concernId) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/concerns/${concernId}/confirm`, { method: 'POST', headers: buildHeaders() });
+        if (!response.ok) throw new Error('确认惦记事项失败');
+        return await response.json();
+    },
+
+    async dismissConcern(sessionId, concernId) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/concerns/${concernId}/dismiss`, { method: 'POST', headers: buildHeaders() });
+        if (!response.ok) throw new Error('拒绝惦记事项失败');
+        return await response.json();
+    },
+
+    async leisureModules() {
+        const response = await fetch(`${API_BASE}/leisure/modules`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取摸鱼模块失败');
+        return await response.json();
+    },
+
+    async openLeisureSession(moduleId, contentRefId = null) {
+        const response = await fetch(`${API_BASE}/leisure/sessions`, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ module_id: moduleId, content_ref_id: contentRefId })
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '打开摸鱼会话失败');
+        return await response.json();
+    },
+
+    async closeLeisureSession(sessionId, reason = 'user_exit') {
+        const response = await fetch(`${API_BASE}/leisure/sessions/${sessionId}/close?reason=${encodeURIComponent(reason)}`, {
+            method: 'POST', headers: buildHeaders()
+        });
+        if (!response.ok) throw new Error('结束摸鱼会话失败');
+        return await response.json();
+    },
+
+    async listLeisureNovels() {
+        const response = await fetch(`${API_BASE}/leisure/novels`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取小说书架失败');
+        return await response.json();
+    },
+
+    async listNovelChapters(bookId) {
+        const response = await fetch(`${API_BASE}/leisure/novels/${encodeURIComponent(bookId)}/chapters`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取章节失败');
+        return await response.json();
+    },
+
+    async getNovelChapter(bookId, chapterId) {
+        const response = await fetch(`${API_BASE}/leisure/novels/${encodeURIComponent(bookId)}/chapters/${encodeURIComponent(chapterId)}`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取章节内容失败');
+        return await response.json();
+    },
+
+    async getNovelProgress(bookId) {
+        const response = await fetch(`${API_BASE}/leisure/novels/${encodeURIComponent(bookId)}/progress`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取阅读进度失败');
+        return await response.json();
+    },
+
+    async saveNovelProgress(bookId, progress) {
+        const response = await fetch(`${API_BASE}/leisure/novels/${encodeURIComponent(bookId)}/progress`, {
+            method: 'PUT',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(progress)
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '保存阅读进度失败');
+        return await response.json();
+    },
+
     async updateUserProfile(sessionId, profileData) {
         const response = await fetch(`${API_BASE}/sessions/${sessionId}/profile`, {
             method: 'PUT',

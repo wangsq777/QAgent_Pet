@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>开始使用 QAgent Pet</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <main class="setup-shell">
+    <header>
+      <span class="eyebrow">QAgent Pet</span>
+      <h1 id="setupTitle">让宠物住进你的电脑</h1>
+      <p>配置一次 AI 服务后，桌宠会自动启动本地核心。聊天、记忆和关系数据只保存在你的用户数据目录。</p>
+    </header>
+
+    <form id="setupForm" novalidate>
+      <label>
+        <span>LLM API Key</span>
+        <span class="password-row">
+          <input id="apiKey" type="password" autocomplete="off" placeholder="请输入 API Key">
+          <button id="showKey" type="button" class="quiet-button">显示</button>
+        </span>
+        <small id="keyHint">API Key 只写入本机用户目录，不会进入项目代码或 config.json。</small>
+      </label>
+
+      <label>
+        <span>API 地址</span>
+        <input id="baseUrl" type="url" required value="https://api.minimaxi.com/anthropic">
+        <small>远程地址必须使用 HTTPS；本地模型可以使用 localhost HTTP。</small>
+      </label>
+
+      <label>
+        <span>模型名称</span>
+        <input id="model" type="text" required maxlength="100" value="MiniMax-M2.5">
+      </label>
+
+      <div class="data-card">
+        <div>
+          <strong>本地数据目录</strong>
+          <code id="dataDir">正在读取…</code>
+        </div>
+        <button id="openDataDir" type="button" class="quiet-button">打开目录</button>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <button id="submitButton" class="primary-button" type="submit">保存并启动桌宠</button>
+    </form>
+  </main>
+  <script src="setup.js"></script>
+</body>
+</html>

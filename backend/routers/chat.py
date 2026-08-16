@@ -1,7 +1,7 @@
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from slowapi import Limiter
@@ -16,6 +16,8 @@ from backend.services.user_profile_agent import user_profile_agent
 from backend.services.mood_agent import mood_agent
 from backend import prompts
 from backend.services.embedding_service import embedding_service
+from backend.services.schedule_service import create_schedule, normalize_schedule_time
+from backend.services.time_service import utc_iso
 from backend.prompts.custom_pet import _sanitize_user_input
 from backend.logging_config import get_logger
 
@@ -231,7 +233,7 @@ async def get_catchphrase_async(pet_type: str, custom_pet_id: str = None, user_i
     return ""
 
 
-async def get_custom_pet_info(custom_pet_id: str, user_id: str = None) -> dict | None:
+async def get_custom_pet_info(custom_pet_id: str, user_id: str = None) -> Optional[dict]:
     """从数据库查询自定义宠物信息，返回 {pet_name, system_prompt, catchphrase} 或 None
 
     带 user_id 归属校验：未传 user_id 时退化为仅按 pet_id 查（仅历史兼容），
@@ -759,26 +761,33 @@ Agent 需要自主从用户消息中识别位置信息：
 
     # 解析日程标记
     schedule_extracted = None
-    schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2})?\]'
+    schedule_pattern = r'\[SCHEDULE:\s*(.+?)\s*\|\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)\s*\]'
     match = re.search(schedule_pattern, reply)
     if match:
         schedule_extracted = {
             "content": match.group(1).strip(),
-            "scheduled_time": match.group(2).strip()
+            "scheduled_time": match.group(2).strip(),
+            "needs_confirmation": len(match.group(2).strip()) == 10,
         }
         reply = re.sub(schedule_pattern, '', reply).strip()
 
     # 保存日程
     if schedule_extracted:
-        schedule_id = str(uuid.uuid4())
         async with get_db() as db:
-            await db.execute(
-                """
-                INSERT INTO schedules (schedule_id, session_id, content, scheduled_time, is_triggered, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (schedule_id, session_id, schedule_extracted["content"], schedule_extracted["scheduled_time"], 0, datetime.now())
-            )
+            settings_cursor = await db.execute("SELECT timezone FROM proactive_settings WHERE user_id=?", (session_dict.get("user_id"),))
+            settings_row = await settings_cursor.fetchone()
+            timezone_name = settings_row[0] if settings_row else "Asia/Shanghai"
+            if schedule_extracted["needs_confirmation"]:
+                candidate_id = str(uuid.uuid4())
+                parsed = datetime.fromisoformat(schedule_extracted["scheduled_time"] + "T00:00:00")
+                now_text = utc_iso()
+                await db.execute("""INSERT INTO schedule_candidates(candidate_id,user_id,session_id,content,scheduled_at_local,timezone,confidence,ambiguity_reason,source_message_id,status,expires_at_utc,created_at_utc,updated_at_utc)
+                                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (candidate_id, session_dict.get("user_id"), session_id, schedule_extracted["content"], parsed.isoformat(), timezone_name, 0.55, "missing_time", user_msg_id, "pending", utc_iso(datetime.now(timezone.utc) + timedelta(hours=72)), now_text, now_text))
+                schedule_extracted.update({"candidate_id": candidate_id, "status": "needs_confirmation"})
+            else:
+                parsed = datetime.fromisoformat(schedule_extracted["scheduled_time"])
+                result = await create_schedule(db, user_id=session_dict.get("user_id"), session_id=session_id, content=schedule_extracted["content"], scheduled_at_utc=normalize_schedule_time(scheduled_at=parsed, scheduled_at_utc=None, timezone=timezone_name), timezone=timezone_name, origin="chat_explicit", source_message_id=user_msg_id)
+                schedule_extracted.update({"schedule_id": result["schedule_id"], "status": "pending", "scheduled_at_utc": result["scheduled_at_utc"]})
             await db.commit()
         logger.info("Schedule saved: %s", schedule_extracted)
 

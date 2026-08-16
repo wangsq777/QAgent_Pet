@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, shell, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -11,20 +11,138 @@ const HEALTH_PORTS = [8080, 10000];
 let petWindow = null;
 let chatWindow = null;
 let webWindow = null;
+let setupWindow = null;
 let tray = null;
 let backendProcess = null;
 let backendBaseUrl = null;
 let config = null;
 let sessionInitPromise = null;
 let isQuitting = false;
+let coreStarted = false;
+let proactiveTimer = null;
+let proactiveClaimInFlight = false;
 
 const desktopRoot = __dirname;
 const projectRoot = app.isPackaged ? process.resourcesPath : path.resolve(desktopRoot, '..');
 const rendererRoot = path.join(desktopRoot, 'renderer');
 const frontendRoot = path.join(projectRoot, 'frontend');
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
-const backendLogPath = () => path.join(desktopRoot, 'backend.log');
-const backendErrLogPath = () => path.join(desktopRoot, 'backend_err.log');
+const runtimeEnvPath = () => path.join(app.getPath('userData'), 'runtime.env');
+const backendLogPath = () => path.join(app.getPath('userData'), 'backend.log');
+const backendErrLogPath = () => path.join(app.getPath('userData'), 'backend_err.log');
+const databasePath = () => path.join(app.getPath('userData'), 'qagent_pet.db');
+
+function parseEnvFile(filePath) {
+  try {
+    const result = {};
+    const content = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || !line.includes('=')) continue;
+      const separator = line.indexOf('=');
+      const key = line.slice(0, separator).trim();
+      const value = line.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '');
+      result[key] = value;
+    }
+    return result;
+  } catch (error) {
+    return {};
+  }
+}
+
+function effectiveEnvPath() {
+  if (fs.existsSync(runtimeEnvPath())) return runtimeEnvPath();
+  const developmentEnv = path.join(projectRoot, '.env');
+  if (!app.isPackaged && fs.existsSync(developmentEnv)) return developmentEnv;
+  return runtimeEnvPath();
+}
+
+function effectiveRuntimeSettings() {
+  return {
+    ...parseEnvFile(effectiveEnvPath()),
+    ...Object.fromEntries(
+      ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL'].filter((key) => process.env[key])
+        .map((key) => [key, process.env[key]])
+    )
+  };
+}
+
+function hasRuntimeConfiguration() {
+  return Boolean(effectiveRuntimeSettings().LLM_API_KEY);
+}
+
+function publicRuntimeInfo() {
+  const values = effectiveRuntimeSettings();
+  return {
+    configured: Boolean(values.LLM_API_KEY),
+    llm_base_url: values.LLM_BASE_URL || 'https://api.minimaxi.com/anthropic',
+    llm_model: values.LLM_MODEL || 'MiniMax-M2.5',
+    data_dir: app.getPath('userData'),
+    database_path: databasePath(),
+    app_version: app.getVersion(),
+    packaged: app.isPackaged
+  };
+}
+
+function validateRuntimeSettings(input = {}) {
+  const existing = effectiveRuntimeSettings();
+  const apiKey = String(input.llm_api_key || existing.LLM_API_KEY || '').trim();
+  const baseUrl = String(input.llm_base_url || existing.LLM_BASE_URL || 'https://api.minimaxi.com/anthropic').trim();
+  const model = String(input.llm_model || existing.LLM_MODEL || 'MiniMax-M2.5').trim();
+
+  if (!apiKey || apiKey.length > 500 || /[\r\n]/.test(apiKey)) {
+    throw new Error('请输入有效的 LLM API Key');
+  }
+  if (!model || model.length > 100 || /[\r\n]/.test(model)) {
+    throw new Error('请输入有效的模型名称');
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(baseUrl);
+  } catch (error) {
+    throw new Error('请输入有效的 API 地址');
+  }
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsedUrl.hostname);
+  if (parsedUrl.protocol !== 'https:' && !(isLocal && parsedUrl.protocol === 'http:')) {
+    throw new Error('远程 API 地址必须使用 HTTPS');
+  }
+
+  return { apiKey, baseUrl: baseUrl.replace(/\/$/, ''), model };
+}
+
+function writeRuntimeSettings(input) {
+  const values = validateRuntimeSettings(input);
+  const existing = parseEnvFile(runtimeEnvPath());
+  const preservedKeys = [
+    'WEATHER_API_KEY',
+    'EMBEDDING_API_URL',
+    'EMBEDDING_API_KEY',
+    'EMBEDDING_MODEL'
+  ];
+  fs.mkdirSync(app.getPath('userData'), { recursive: true });
+  const body = [
+    '# QAgent Pet desktop runtime settings',
+    `LLM_API_KEY=${values.apiKey}`,
+    `LLM_BASE_URL=${values.baseUrl}`,
+    `LLM_MODEL=${values.model}`,
+    ...preservedKeys
+      .filter((key) => existing[key] && !/[\r\n]/.test(existing[key]))
+      .map((key) => `${key}=${existing[key]}`),
+    'PORT=10000',
+    'CORS_ORIGINS=http://localhost:10000,http://127.0.0.1:10000',
+    'LOG_LEVEL=INFO',
+    ''
+  ].join('\n');
+  fs.writeFileSync(runtimeEnvPath(), body, { encoding: 'utf8', mode: 0o600 });
+  try {
+    fs.chmodSync(runtimeEnvPath(), 0o600);
+  } catch (error) {
+    // Windows does not implement Unix file modes; the per-user directory is
+    // still the correct storage boundary there.
+  }
+  return publicRuntimeInfo();
+}
 
 function nowId() {
   return Date.now().toString(36);
@@ -35,6 +153,7 @@ function createDefaultConfig() {
     user_id: `desktop_${nowId()}`,
     pet_type: DEFAULT_PET_TYPE,
     custom_pet_id: null,
+    custom_pet_raw_type: null,
     session_id: null,
     dnd: false,
     backend_port: null,
@@ -115,7 +234,8 @@ async function checkHealthOnPort(port) {
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) return false;
-    await response.json().catch(() => null);
+    const health = await response.json().catch(() => null);
+    if (health?.app !== 'qagent-pet') return false;
     backendBaseUrl = `http://127.0.0.1:${port}`;
     patchConfig({ backend_port: port });
     return true;
@@ -138,27 +258,58 @@ async function detectBackend() {
   return false;
 }
 
+function resolveBackendCommand() {
+  const isWin = process.platform === 'win32';
+  if (app.isPackaged) {
+    const executable = path.join(process.resourcesPath, 'backend', isWin ? 'qagent-backend.exe' : 'qagent-backend');
+    if (!fs.existsSync(executable)) {
+      throw new Error(`安装包缺少后端程序：${executable}`);
+    }
+    return { command: executable, args: [] };
+  }
+
+  const configuredPython = process.env.QAGENT_PYTHON || process.env.PYTHON;
+  const virtualenvPython = path.join(projectRoot, '.venv', isWin ? 'Scripts/python.exe' : 'bin/python');
+  const pythonCommand = configuredPython || (fs.existsSync(virtualenvPython) ? virtualenvPython : (isWin ? 'py' : 'python3'));
+  const args = isWin && path.basename(pythonCommand).toLowerCase() === 'py'
+    ? ['-3', 'main.py']
+    : ['main.py'];
+  return { command: pythonCommand, args };
+}
+
+function backendEnvironment() {
+  const legacyDatabase = path.join(projectRoot, 'qagent_pet.db');
+  return {
+    ...process.env,
+    QAGENT_DATA_DIR: app.getPath('userData'),
+    QAGENT_ENV_FILE: effectiveEnvPath(),
+    QAGENT_FRONTEND_DIR: frontendRoot,
+    ...(fs.existsSync(legacyDatabase) ? { QAGENT_LEGACY_DATABASE_PATH: legacyDatabase } : {})
+  };
+}
+
 function spawnBackend() {
   if (backendProcess) return;
 
+  fs.mkdirSync(app.getPath('userData'), { recursive: true });
   const out = fs.openSync(backendLogPath(), 'a');
   const err = fs.openSync(backendErrLogPath(), 'a');
-  // 安全启动：不经 shell 直接 spawn，避免 shell 注入风险。
-  // 可通过 QAGENT_PYTHON / PYTHON 指定打包后的 Python 可执行文件；
-  // Windows 默认使用 py 启动器，其他平台优先 python3。
-  const isWin = process.platform === 'win32';
-  const pythonCommand = process.env.QAGENT_PYTHON || process.env.PYTHON || (isWin ? 'py' : 'python3');
-  const pythonArgs = isWin && path.basename(pythonCommand).toLowerCase() === 'py'
-    ? ['-3', 'main.py']
-    : ['main.py'];
-  backendProcess = spawn(pythonCommand, pythonArgs, {
-    cwd: projectRoot,
+  const backend = resolveBackendCommand();
+  backendProcess = spawn(backend.command, backend.args, {
+    cwd: app.isPackaged ? app.getPath('userData') : projectRoot,
+    env: backendEnvironment(),
     shell: false,
     windowsHide: true,
     detached: false,
     stdio: ['ignore', out, err]
   });
+  fs.closeSync(out);
+  fs.closeSync(err);
 
+  backendProcess.on('error', (error) => {
+    fs.appendFileSync(backendErrLogPath(), `[desktop] ${error.message}\n`, 'utf8');
+    backendProcess = null;
+  });
   backendProcess.on('exit', () => {
     backendProcess = null;
   });
@@ -167,7 +318,11 @@ function spawnBackend() {
 async function ensureBackendReady() {
   if (await detectBackend()) return { ok: true, baseUrl: getBackendUrl(), started: false };
 
-  spawnBackend();
+  try {
+    spawnBackend();
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
   for (let i = 0; i < 30; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     if (await detectBackend()) {
@@ -177,7 +332,7 @@ async function ensureBackendReady() {
 
   return {
     ok: false,
-    error: `后端启动失败。请检查 ${backendLogPath()} 和 ${backendErrLogPath()}，或手动运行 python main.py。`
+    error: `后端启动失败。请检查 ${backendLogPath()} 和 ${backendErrLogPath()}。`
   };
 }
 
@@ -205,7 +360,8 @@ async function ensureSessionInternal() {
 
   return patchConfig({
     session_id: session.session_id,
-    pet_type: session.pet_type || body.pet_type
+    pet_type: session.pet_type || body.pet_type,
+    custom_pet_id: session.custom_pet_id || body.custom_pet_id || null
   });
 }
 
@@ -219,7 +375,7 @@ async function ensureSession() {
   return sessionInitPromise;
 }
 
-function getPetImagePath(petType = DEFAULT_PET_TYPE) {
+function getPetImagePath(petType = DEFAULT_PET_TYPE, rawPetType = null) {
   const imageMap = {
     hot_dog: 'hot_dog.png',
     cold_cat: 'cold_cat.png',
@@ -237,11 +393,14 @@ function getPetImagePath(petType = DEFAULT_PET_TYPE) {
     pig: 'pig.png',
     horse: 'horse.png'
   };
-  return path.join(frontendRoot, 'images', imageMap[petType] || imageMap.hot_dog);
+  // 自定义宠物：优先使用原始动物类型查找对应图片；找不到时再用默认狗狗兜底
+  const lookupType = (petType === 'custom' && rawPetType) ? rawPetType : petType;
+  return path.join(frontendRoot, 'images', imageMap[lookupType] || imageMap.hot_dog);
 }
 
 function getTrayIcon() {
-  const iconPath = getPetImagePath(readConfig().pet_type);
+  const cfg = readConfig();
+  const iconPath = getPetImagePath(cfg.pet_type, cfg.custom_pet_raw_type);
   const image = nativeImage.createFromPath(iconPath);
   if (image.isEmpty()) return nativeImage.createEmpty();
   return image.resize({ width: 18, height: 18 });
@@ -260,6 +419,8 @@ function buildAppMenu() {
   const template = [
     { label: '显示桌宠', click: () => showPetWindow() },
     { label: '打开完整 Web 面板', click: () => openWebPanel() },
+    { label: 'AI 服务设置', click: () => createSetupWindow() },
+    { label: '打开数据目录', click: () => shell.openPath(app.getPath('userData')) },
     { type: 'separator' },
     {
       label: cfg.dnd ? '关闭勿扰模式' : '开启勿扰模式',
@@ -308,6 +469,37 @@ function showPetWindow() {
   if (!petWindow) return;
   petWindow.show();
   petWindow.focus();
+}
+
+function createSetupWindow({ required = false } = {}) {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.show();
+    setupWindow.focus();
+    return setupWindow;
+  }
+
+  setupWindow = new BrowserWindow({
+    width: 560,
+    height: 680,
+    minWidth: 520,
+    minHeight: 620,
+    resizable: true,
+    title: required ? '开始使用 QAgent Pet' : 'QAgent Pet AI 服务设置',
+    webPreferences: {
+      preload: path.join(desktopRoot, 'preload_setup.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  setupWindow.loadFile(path.join(rendererRoot, 'setup.html'), {
+    query: { required: required ? '1' : '0' }
+  });
+  setupWindow.on('closed', () => {
+    setupWindow = null;
+  });
+  return setupWindow;
 }
 
 function createPetWindow() {
@@ -392,7 +584,11 @@ function toggleChatWindow() {
 }
 
 async function openWebPanel() {
-  await ensureBackendReady();
+  const backend = await ensureBackendReady();
+  if (!backend.ok) {
+    dialog.showErrorBox(APP_NAME, backend.error || '后端启动失败');
+    return;
+  }
   await ensureSession();
   const cfg = readConfig();
   const baseUrl = getBackendUrl();
@@ -435,8 +631,57 @@ function sendToWindows(channel, payload) {
   }
 }
 
+async function claimProactiveEvent() {
+  if (proactiveClaimInFlight || !backendBaseUrl || readConfig().dnd) return null;
+  proactiveClaimInFlight = true;
+  try {
+    const cfg = await ensureSession();
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const result = await requestJson('/api/proactive/events/claim', {
+      method: 'POST',
+      body: { session_id: cfg.session_id, timezone, client_id: `desktop-${app.getPath('userData')}` }
+    });
+    if (result?.event) {
+      sendToWindows('proactive-event', result.event);
+    }
+    return result?.event || null;
+  } catch (error) {
+    fs.appendFileSync(backendErrLogPath(), `[proactive] ${error.message}\n`, 'utf8');
+    return null;
+  } finally {
+    proactiveClaimInFlight = false;
+  }
+}
+
+function startProactivePolling() {
+  if (proactiveTimer) clearInterval(proactiveTimer);
+  claimProactiveEvent();
+  proactiveTimer = setInterval(() => claimProactiveEvent(), 60 * 1000);
+}
+
 function registerIpc() {
   ipcMain.handle('app:get-config', async () => readConfig());
+  ipcMain.handle('app:get-runtime-info', async () => publicRuntimeInfo());
+  ipcMain.handle('app:save-runtime-settings', async (_event, input) => writeRuntimeSettings(input || {}));
+  ipcMain.handle('app:complete-setup', async () => {
+    const restarting = coreStarted;
+    setTimeout(() => {
+      if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
+      if (restarting) {
+        isQuitting = true;
+        app.relaunch();
+        app.exit(0);
+      } else {
+        startCoreApp();
+      }
+    }, 150);
+    return { restarting };
+  });
+  ipcMain.handle('app:open-setup', async () => {
+    createSetupWindow();
+    return true;
+  });
+  ipcMain.handle('app:open-data-dir', async () => shell.openPath(app.getPath('userData')));
   ipcMain.handle('app:set-config', async (_event, partial) => {
     const next = patchConfig(partial || {});
     updateTrayMenu();
@@ -444,6 +689,7 @@ function registerIpc() {
     return next;
   });
   ipcMain.handle('app:toggle-chat', async () => toggleChatWindow());
+  ipcMain.handle('app:show-pet', async () => showPetWindow());
   ipcMain.handle('app:move-pet', async (_event, dx, dy) => {
     if (!petWindow || petWindow.isDestroyed()) return;
     const bounds = petWindow.getBounds();
@@ -456,7 +702,10 @@ function registerIpc() {
   });
   ipcMain.handle('app:ensure-backend', async () => ensureBackendReady());
   ipcMain.handle('app:ensure-session', async () => ensureSession());
-  ipcMain.handle('app:get-pet-image', async () => getPetImagePath(readConfig().pet_type));
+  ipcMain.handle('app:get-pet-image', async () => {
+    const cfg = readConfig();
+    return getPetImagePath(cfg.pet_type, cfg.custom_pet_raw_type);
+  });
   ipcMain.handle('app:notify-chat-done', async () => {
     sendToWindows('pet-refresh');
   });
@@ -487,13 +736,14 @@ function registerIpc() {
       body: { mode }
     });
   });
+  ipcMain.handle('api:proactive-delivered', async (_event, eventId, claimToken) => requestJson(`/api/proactive/events/${eventId}/delivered`, { method: 'POST', body: { claim_token: claimToken } }));
+  ipcMain.handle('api:proactive-opened', async (_event, eventId, claimToken) => requestJson(`/api/proactive/events/${eventId}/opened`, { method: 'POST', body: { claim_token: claimToken } }));
+  ipcMain.handle('api:proactive-action', async (_event, eventId, action, claimToken) => requestJson(`/api/proactive/events/${eventId}/action`, { method: 'POST', body: { action, claim_token: claimToken } }));
 }
 
-app.whenReady().then(async () => {
-  app.setName(APP_NAME);
-  readConfig();
-  registerIpc();
-  createTray();
+async function startCoreApp() {
+  if (coreStarted) return;
+  coreStarted = true;
   createPetWindow();
   createChatWindow();
 
@@ -504,6 +754,7 @@ app.whenReady().then(async () => {
         updateTrayMenu();
         sendToWindows('config-updated', readConfig());
         sendToWindows('pet-refresh');
+        startProactivePolling();
       })
       .catch((error) => {
         dialog.showErrorBox(APP_NAME, `创建桌宠会话失败：${error.message}`);
@@ -511,6 +762,19 @@ app.whenReady().then(async () => {
   } else {
     dialog.showErrorBox(APP_NAME, backend.error || '后端启动失败');
     sendToWindows('backend-error', backend.error || '后端启动失败');
+  }
+}
+
+app.whenReady().then(async () => {
+  app.setName(APP_NAME);
+  readConfig();
+  registerIpc();
+  createTray();
+
+  if (hasRuntimeConfiguration()) {
+    await startCoreApp();
+  } else {
+    createSetupWindow({ required: true });
   }
 });
 
@@ -524,4 +788,9 @@ app.on('before-quit', () => {
     backendProcess.kill();
     backendProcess = null;
   }
+  if (proactiveTimer) clearInterval(proactiveTimer);
+});
+
+powerMonitor.on('resume', () => {
+  if (coreStarted) claimProactiveEvent();
 });

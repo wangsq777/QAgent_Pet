@@ -1,10 +1,17 @@
+import os
+
 from pydantic_settings import BaseSettings
 from typing import Optional
 
 
+def _settings_file() -> str:
+    """Allow the desktop shell to keep secrets in its per-user data directory."""
+    return os.getenv("QAGENT_ENV_FILE", ".env")
+
+
 class Settings(BaseSettings):
     LLM_API_KEY: str = ""
-    LLM_BASE_URL: str = "https://api.minimax.chat/v1"
+    LLM_BASE_URL: str = "https://api.minimaxi.com/anthropic"
     LLM_MODEL: str = "MiniMax-M2.5"
     WEATHER_API_KEY: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./qagent_pet.db"
@@ -28,8 +35,11 @@ class Settings(BaseSettings):
     # 留空表示不启用可信代理校验（仅本地开发安全）。
     TRUSTED_PROXIES: str = ""
 
+    # 日志级别
+    LOG_LEVEL: str = "INFO"
+
     class Config:
-        env_file = ".env"
+        env_file = _settings_file()
         env_file_encoding = "utf-8"
 
 

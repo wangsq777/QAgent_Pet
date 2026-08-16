@@ -6,6 +6,7 @@ const thinking = document.getElementById('thinking');
 const dndToggle = document.getElementById('dndToggle');
 const openWeb = document.getElementById('openWeb');
 const petTitle = document.getElementById('petTitle');
+let proactiveEvent = null;
 
 const PET_NAMES = {
   hot_dog: 'Hot Dog',
@@ -111,6 +112,26 @@ dndToggle.addEventListener('click', async () => {
 });
 
 openWeb.addEventListener('click', () => window.desktopAPI.openWebPanel());
+
+window.desktopAPI.onProactiveEvent(async (event) => {
+  proactiveEvent = event;
+  appendMessage('assistant', event.full_message || '我来看看你。', 'proactive');
+  try { await window.desktopAPI.proactiveOpened(event.event_id, event.claim_token); } catch (error) {}
+  const actions = document.createElement('div');
+  actions.className = 'proactive-actions';
+  [['知道了', 'acknowledge'], ['晚点提醒', 'snooze_10m'], ['完成', 'complete'], ['不再提醒', 'dismiss']].forEach(([label, action]) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = label;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await window.desktopAPI.proactiveAction(event.event_id, action, event.claim_token); actions.remove(); }
+      catch (error) { button.disabled = false; appendMessage('assistant', `操作失败：${error.message}`); }
+    });
+    actions.appendChild(button);
+  });
+  messagesEl.appendChild(actions);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+});
 
 window.desktopAPI.onConfigUpdated(syncHeader);
 window.desktopAPI.onPetRefresh(loadMessages);

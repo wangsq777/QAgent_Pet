@@ -2,6 +2,9 @@
 .env
 
 # Python
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -25,6 +28,7 @@ wheels/
 
 # Database
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
 
@@ -35,7 +39,12 @@ llm_debug.log
 # Electron desktop app
 /desktop/node_modules/
 /desktop/dist/
+/desktop/backend-dist/
+/desktop/backend-build/
 /desktop/*.log
+
+# Local generated deliverables
+/output/
 
 # IDE
 .idea/
@@ -55,4 +64,3 @@ Thumbs.db
 .workbuddy/
 AGENTS.md
 CLAUDE.md
-

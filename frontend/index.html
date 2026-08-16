@@ -4,21 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>宠物广场 - QAgent Pet 桌面伙伴</title>
-    <link rel="stylesheet" href="css/shell.css?v=1">
-    <link rel="stylesheet" href="css/styles.css?v=4">
+    <link rel="stylesheet" href="css/shell.css?v=3">
+    <link rel="stylesheet" href="css/styles.css?v=6">
 </head>
 <body>
     <div class="container page-shell">
         <header class="welcome-header">
             <div class="welcome-text">
-                <h1>🐾 QAgent Pet 宠物广场</h1>
+                <h1>QAgent Pet 宠物广场</h1>
                 <p>选择一只长期陪伴你的桌面电子宠物，让它记住你、陪你聊天，也陪你学习。</p>
             </div>
-            <button class="create-custom-btn" onclick="goToCustomPet()">
-                <span>✨</span>
-                <span>创建自定义宠物</span>
-            </button>
         </header>
+
+        <section class="create-pet-panel" aria-labelledby="create-pet-title">
+            <div class="create-pet-art" aria-hidden="true">
+                <img src="images/custom_pet.svg" alt="">
+            </div>
+            <div>
+                <span class="create-pet-label">宠物工坊</span>
+                <h2 id="create-pet-title">做一只真正属于你的伙伴</h2>
+                <p>选择物种、性格、口头禅和习惯，它会带着这些设定进入长期陪伴。</p>
+            </div>
+            <button class="create-custom-btn" onclick="goToCustomPet()">创建宠物</button>
+        </section>
 
         <div class="pet-grid">
             <div class="pet-card hot-dog" data-pet-type="hot_dog">
@@ -33,7 +41,6 @@
                     <span>高互动</span>
                 </div>
                 <button class="select-btn" onclick="selectPet('hot_dog')">选择 Hot Dog</button>
-                <button class="learn-entry-btn" onclick="learnWithPet('hot_dog')">📚 陪我学</button>
             </div>
 
             <div class="pet-card cold-cat" data-pet-type="cold_cat">
@@ -48,7 +55,6 @@
                     <span>细节控</span>
                 </div>
                 <button class="select-btn" onclick="selectPet('cold_cat')">选择 Cold Cat</button>
-                <button class="learn-entry-btn" onclick="learnWithPet('cold_cat')">📚 陪我学</button>
             </div>
 
             <div class="pet-card mouse" data-pet-type="mouse">
@@ -63,7 +69,6 @@
                     <span>慢热型</span>
                 </div>
                 <button class="select-btn" onclick="selectPet('mouse')">选择 鼠鼠</button>
-                <button class="learn-entry-btn" onclick="learnWithPet('mouse')">📚 陪我学</button>
             </div>
 
             <!-- 自定义宠物将动态插入到这里 -->
@@ -79,7 +84,7 @@
     </div>
 
     <script src="js/api.js?v=3"></script>
-    <script src="js/shell.js?v=1"></script>
+    <script src="js/shell.js?v=4"></script>
     <script>
         initAppShell('index');
 
@@ -173,7 +178,6 @@
                                 <button class="select-btn" onclick='selectCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl}, ${JSON.stringify(pet.pet_type)})'>进入 ${pet.pet_name} 的会话</button>
                                 <button class="delete-pet-btn" onclick='deletePet(event, ${safePetId}, ${safePetName})'>删除这个宠物</button>
                             </div>
-                            <button class="learn-entry-btn" onclick='learnWithCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl}, ${JSON.stringify(pet.pet_type)})'>📚 陪我学</button>
                         `;
 
                         petGrid.appendChild(petCard);
@@ -185,7 +189,7 @@
                     emptyMsg.innerHTML = `
                         <div class="icon">🐾</div>
                         <p>还没有创建自定义宠物</p>
-                        <p style="font-size: 12px; margin-top: 6px;">点击右上角按钮，做一只真正符合你偏好的宠物。</p>
+                        <p style="font-size: 12px; margin-top: 6px;">使用上方宠物工坊，做一只真正符合你偏好的宠物。</p>
                     `;
                     petGrid.appendChild(emptyMsg);
                 }
@@ -225,6 +229,20 @@
                     localStorage.removeItem('qagent_custom_avatar');
                 }
 
+                // 如果在 Electron 桌面端内，同步更新主进程配置
+                if (window.desktopAPI && window.desktopAPI.setConfig) {
+                    try {
+                        await window.desktopAPI.setConfig({
+                            pet_type: 'custom',
+                            custom_pet_id: petId,
+                            custom_pet_raw_type: rawPetType,
+                            session_id: response.session_id
+                        });
+                    } catch (e) {
+                        console.error('同步桌面配置失败:', e);
+                    }
+                }
+
                 window.location.href = 'chat.html';
             } catch (error) {
                 alert('创建会话失败，请重试: ' + error.message);
@@ -259,7 +277,7 @@
                     emptyMsg.innerHTML = `
                         <div class="icon">🐾</div>
                         <p>还没有创建自定义宠物</p>
-                        <p style="font-size: 12px; margin-top: 6px;">点击右上角按钮，做一只真正符合你偏好的宠物。</p>
+                        <p style="font-size: 12px; margin-top: 6px;">使用上方宠物工坊，做一只真正符合你偏好的宠物。</p>
                     `;
                     petGrid.appendChild(emptyMsg);
                 }
@@ -294,6 +312,20 @@
                 localStorage.setItem('qagent_welcome', JSON.stringify(response.welcome_message || {}));
                 localStorage.setItem('qagent_intimacy', response.intimacy);
 
+                // 如果在 Electron 桌面端内，同步更新主进程配置，切回预置宠物
+                if (window.desktopAPI && window.desktopAPI.setConfig) {
+                    try {
+                        await window.desktopAPI.setConfig({
+                            pet_type: response.pet_type,
+                            custom_pet_id: null,
+                            custom_pet_raw_type: null,
+                            session_id: response.session_id
+                        });
+                    } catch (e) {
+                        console.error('同步桌面配置失败:', e);
+                    }
+                }
+
                 window.location.href = 'chat.html';
             } catch (error) {
                 alert('创建会话失败，请重试: ' + error.message);
@@ -302,38 +334,9 @@
         }
 
         function goToCustomPet() {
-            window.location.href = 'custom_pet.html';
+            window.location.href = 'custom_pet.html?ui=4';
         }
 
-        /**
-         * 预置宠物进入陪我学：直接带 pet_id 跳转。
-         * 不强制先建聊天会话，learn.html 仅依赖 pet_id 渲染陪学伙伴。
-         */
-        function learnWithPet(petType) {
-            if (!userId) {
-                alert('请稍后再试');
-                return;
-            }
-            window.location.href = `learn.html?pet_id=${encodeURIComponent(petType)}`;
-        }
-
-        /**
-         * 自定义宠物进入陪我学：先把自定义宠物信息写入 localStorage，
-         * 供 learn.html 解析陪学伙伴名称/头像/原始 pet_type。
-         */
-        function learnWithCustomPet(petId, petName, avatarUrl, rawPetType) {
-            if (!userId) {
-                alert('请稍后再试');
-                return;
-            }
-            localStorage.setItem('qagent_custom_pet_id', petId);
-            localStorage.setItem('qagent_custom_pet_name', petName);
-            if (avatarUrl) {
-                localStorage.setItem('qagent_custom_avatar', avatarUrl);
-            }
-            localStorage.setItem('qagent_custom_pet', JSON.stringify({ pet_type: rawPetType }));
-            window.location.href = `learn.html?pet_id=${encodeURIComponent(petId)}`;
-        }
     </script>
 </body>
 </html>

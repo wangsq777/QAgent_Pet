@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>创建专属宠物 - QAgent Pet 桌面伙伴</title>
-    <link rel="stylesheet" href="css/shell.css?v=1">
-    <link rel="stylesheet" href="css/styles.css?v=4">
+    <link rel="stylesheet" href="css/shell.css?v=3">
+    <link rel="stylesheet" href="css/styles.css?v=6">
     <link rel="stylesheet" href="css/custom_pet.css?v=4">
 </head>
 <body>
@@ -13,7 +13,7 @@
         <div class="builder-shell">
             <section class="builder-main">
                 <div class="builder-topbar">
-                    <a class="secondary-link" href="index.html">← 返回宠物广场</a>
+                    <a class="secondary-link" href="index.html?ui=4">← 返回宠物广场</a>
                     <span class="builder-hint">自定义角色 · 实时预览</span>
                 </div>
 
@@ -185,9 +185,9 @@
     </div>
 
     <script src="js/api.js?v=3"></script>
-    <script src="js/shell.js?v=1"></script>
+    <script src="js/shell.js?v=4"></script>
     <script>
-        initAppShell('custom_pet');
+        initAppShell('index');
         let selectedPetType = 'dog';
         let selectedTags = [];
         let isExpanded = false;
@@ -451,6 +451,20 @@
                     }));
                 }
                 localStorage.setItem('qagent_intimacy', sessionResponse.intimacy || '0');
+
+                // 如果在 Electron 桌面端内，同步更新主进程配置，否则桌面桌宠仍会显示默认狗狗
+                if (window.desktopAPI && window.desktopAPI.setConfig) {
+                    try {
+                        await window.desktopAPI.setConfig({
+                            pet_type: 'custom',
+                            custom_pet_id: petResponse.pet_id,
+                            custom_pet_raw_type: selectedPetType,
+                            session_id: sessionResponse.session_id
+                        });
+                    } catch (e) {
+                        console.error('同步桌面配置失败:', e);
+                    }
+                }
 
                 window.location.href = 'chat.html';
             } catch (error) {

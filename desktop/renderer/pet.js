@@ -11,9 +11,17 @@ let bubbleTimer = null;
 let currentConfig = null;
 let dragState = null;
 let clickMoved = false;
+let currentProactive = null;
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date()).reduce((result, item) => {
+    if (item.type !== 'literal') result[item.type] = item.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function setHint(message) {
@@ -127,6 +135,12 @@ async function init() {
     if (!clickMoved) window.desktopAPI.toggleChat();
   });
   petBubble.addEventListener('click', () => window.desktopAPI.toggleChat());
+
+  window.desktopAPI.onProactiveEvent(async (event) => {
+    currentProactive = event;
+    showBubble(event.bubble_text || '提醒');
+    try { await window.desktopAPI.proactiveDelivered(event.event_id, event.claim_token); } catch (error) {}
+  });
 
   window.desktopAPI.onConfigUpdated((config) => {
     currentConfig = config;

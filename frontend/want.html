@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>你想要的 - QAgent Pet</title>
+    <link rel="stylesheet" href="css/shell.css?v=3">
+    <link rel="stylesheet" href="css/want.css?v=3">
+</head>
+<body>
+    <main class="want-page">
+        <header class="want-header">
+            <div>
+                <span class="want-kicker">按现在的心情来</span>
+                <h1>你想要的</h1>
+                <p>想认真读点东西，或者安静摸一会儿鱼，都在这里。</p>
+            </div>
+            <a class="companion-chip" href="index.html?ui=4" aria-label="前往广场切换宠物">
+                <img id="want-pet-avatar" src="images/hot_dog.png" alt="当前宠物">
+                <span><small>当前陪伴</small><strong id="want-pet-name">Hot Dog</strong></span>
+                <span aria-hidden="true">›</span>
+            </a>
+        </header>
+
+        <div class="want-tabs" role="tablist" aria-label="你想要的模式">
+            <button id="learn-tab" class="want-tab active" type="button" role="tab" aria-selected="true" data-tab="learn">
+                <span aria-hidden="true">📚</span> 陪我学
+            </button>
+            <button id="leisure-tab" class="want-tab" type="button" role="tab" aria-selected="false" data-tab="leisure">
+                <span aria-hidden="true">☕</span> 摸鱼一下
+            </button>
+        </div>
+
+        <section id="learn-panel" class="want-panel" role="tabpanel" aria-labelledby="learn-tab">
+            <div class="learn-intro">
+                <div class="learn-visual" aria-hidden="true">
+                    <img id="learn-pet-image" src="images/hot_dog.png" alt="">
+                    <span>READY</span>
+                </div>
+                <div class="learn-copy">
+                    <span class="section-label">源码导读</span>
+                    <h2>挑一个公开项目，一起把它读懂</h2>
+                    <p>宠物陪在旁边，导读老师负责拆解目录、关键文件和学习顺序。</p>
+                    <div id="pet-options" class="pet-options" aria-label="选择陪学宠物"></div>
+                    <div class="primary-actions">
+                        <button id="start-learning" class="primary-command" type="button">开始陪学</button>
+                        <a href="index.html?ui=4">去广场换一只宠物</a>
+                    </div>
+                </div>
+            </div>
+            <div class="learn-facts" aria-label="陪学流程">
+                <span><strong>01</strong> 分析仓库</span>
+                <span><strong>02</strong> 生成大纲</span>
+                <span><strong>03</strong> 分章学习</span>
+                <span><strong>04</strong> 宠物陪伴</span>
+            </div>
+        </section>
+
+        <section id="leisure-panel" class="want-panel" role="tabpanel" aria-labelledby="leisure-tab" hidden>
+            <div id="leisure-library">
+                <div class="panel-heading">
+                    <div><span class="section-label">短暂休息</span><h2>随手翻一点，停在哪里都算数</h2></div>
+                    <span id="leisure-status" class="panel-status">正在加载…</span>
+                </div>
+                <div id="book-list" class="book-list" aria-live="polite"></div>
+            </div>
+
+            <article id="novel-reader" class="novel-reader" hidden>
+                <header class="reader-toolbar">
+                    <button id="close-reader" class="icon-command" type="button" title="返回书架" aria-label="返回书架">←</button>
+                    <div><small id="reader-book-title">小说</small><strong id="reader-chapter-title">章节</strong></div>
+                    <span id="reader-progress">1 / 1</span>
+                </header>
+                <div class="reader-controls" aria-label="阅读设置">
+                    <label class="chapter-control">目录
+                        <select id="chapter-select" aria-label="选择章节"></select>
+                    </label>
+                    <label>字号
+                        <select id="font-size-select" aria-label="阅读字号">
+                            <option value="16">小</option>
+                            <option value="18">标准</option>
+                            <option value="20">大</option>
+                            <option value="22">特大</option>
+                        </select>
+                    </label>
+                    <label>行距
+                        <select id="line-height-select" aria-label="阅读行距">
+                            <option value="1.65">紧凑</option>
+                            <option value="1.85">舒适</option>
+                            <option value="2.05">宽松</option>
+                        </select>
+                    </label>
+                    <div class="theme-control">
+                        <span>主题</span>
+                        <div class="theme-options" role="group" aria-label="阅读主题">
+                            <button type="button" data-reader-theme="light">浅色</button>
+                            <button type="button" data-reader-theme="paper">纸张</button>
+                            <button type="button" data-reader-theme="dark">深色</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="reader-content" class="reader-content"></div>
+                <footer class="reader-actions">
+                    <button id="previous-chapter" type="button">上一章</button>
+                    <button id="next-chapter" class="primary-command" type="button">下一章</button>
+                </footer>
+            </article>
+        </section>
+    </main>
+
+    <script src="js/api.js?v=4"></script>
+    <script src="js/shell.js?v=4"></script>
+    <script src="js/want.js?v=2"></script>
+</body>
+</html>

@@ -16,7 +16,7 @@ services:
       - key: LLM_API_KEY
         sync: false  # 需要在 Render Dashboard 中手动设置
       - key: LLM_BASE_URL
-        value: "https://api.minimax.chat/v1"
+        value: "https://api.minimaxi.com/anthropic"
       - key: LLM_MODEL
         value: "MiniMax-M2.5"
       - key: WEATHER_API_KEY

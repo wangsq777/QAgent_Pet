@@ -1,6 +1,7 @@
 import uuid
 import re
 from datetime import datetime, timedelta
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -35,7 +36,7 @@ def get_intimacy_level(intimacy: int) -> str:
         return "挚友"
 
 
-def _parse_datetime(value) -> datetime | None:
+def _parse_datetime(value) -> Optional[datetime]:
     if not value:
         return None
     if isinstance(value, datetime):

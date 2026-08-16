@@ -1,12 +1,15 @@
 {
   "name": "qagent-pet-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "QAgent Pet Electron desktop pet MVP",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "build:icons": "node scripts/build-icons.js",
+    "build:backend": "node scripts/build-backend.js",
+    "dist": "npm run build:icons && npm run build:backend && electron-builder",
+    "dist:dir": "npm run build:icons && npm run build:backend && electron-builder --dir"
   },
   "author": "QAgent Pet",
   "license": "UNLICENSED",
@@ -24,6 +27,7 @@
       "main.js",
       "preload.js",
       "preload_web.js",
+      "preload_setup.js",
       "renderer/**/*",
       "package.json"
     ],
@@ -33,31 +37,35 @@
         "to": "frontend"
       },
       {
-        "from": "../backend",
+        "from": "backend-dist/qagent-backend",
         "to": "backend"
-      },
-      {
-        "from": "../main.py",
-        "to": "main.py"
-      },
-      {
-        "from": "../requirements.txt",
-        "to": "requirements.txt"
-      },
-      {
-        "from": "../.env.example",
-        "to": ".env.example"
       }
     ],
     "extraMetadata": {
       "main": "main.js"
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
       ],
       "signAndEditExecutable": false
+    },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.entertainment"
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game"
     },
     "nsis": {
       "oneClick": false,

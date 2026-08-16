@@ -5,18 +5,15 @@
 }
 
 .settings-header {
-    padding: 30px;
-    border-radius: var(--radius-xl);
-    background: var(--bg-card);
-    border: 1.5px solid var(--line-soft);
-    box-shadow: var(--shadow-card);
-    margin-bottom: 18px;
+    padding: 0 0 26px;
+    border-bottom: 1px solid var(--line-soft);
+    margin-bottom: 24px;
 }
 
 .settings-header h1 {
-    margin: 16px 0 10px;
-    font-size: clamp(1.8rem, 4vw, 3rem);
-    letter-spacing: -0.05em;
+    margin: 12px 0 8px;
+    font-size: 32px;
+    letter-spacing: 0;
 }
 
 .settings-header p,
@@ -39,8 +36,8 @@
     padding: 22px;
     border-radius: var(--radius-lg);
     background: var(--bg-card);
-    border: 1.5px solid var(--line-soft);
-    box-shadow: var(--shadow-card);
+    border: 1px solid var(--line-soft);
+    box-shadow: none;
 }
 
 .setting-card.primary-card {
@@ -88,12 +85,20 @@
 
 .setting-card code {
     display: block;
-    width: fit-content;
+    width: 100%;
     padding: 8px 10px;
-    border-radius: 12px;
+    border-radius: 4px;
     background: var(--bg-card-alt);
     color: var(--text-primary);
     font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.setting-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
 }
 
 @media (max-width: 860px) {
@@ -105,4 +110,6 @@
         width: min(100% - 24px, 1100px);
         padding-top: 20px;
     }
+
+    .settings-header h1 { font-size: 28px; }
 }

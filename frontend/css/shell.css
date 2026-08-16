@@ -21,28 +21,25 @@ body.app-shell-enabled {
     align-items: center;
     gap: 16px;
     padding: 14px 10px;
-    background: #fffaf2;
-    border-right: 1px solid rgba(60, 45, 30, 0.10);
-    box-shadow: 8px 0 28px rgba(80, 55, 30, 0.06);
+    background: #fffdf9;
+    border-right: 1px solid rgba(49, 42, 35, 0.12);
 }
 
 .app-rail-brand {
     width: 52px;
     height: 52px;
-    border-radius: 18px;
+    border-radius: 8px;
     display: grid;
     place-items: center;
-    color: #3a2e24;
+    color: #fffdf9;
     text-decoration: none;
-    background: #fff1e3;
-    border: 1px solid rgba(238, 108, 77, 0.22);
-    font-size: 20px;
+    background: #d95f45;
+    border: 1px solid #d95f45;
     line-height: 1;
 }
 
 .app-rail-brand strong {
-    font-size: 11px;
-    margin-top: -8px;
+    font-size: 20px;
 }
 
 .app-rail-links {
@@ -56,23 +53,30 @@ body.app-shell-enabled {
     justify-items: center;
     gap: 3px;
     padding: 9px 6px;
-    border-radius: 18px;
+    border-radius: 6px;
     color: #7a6b5d;
     text-decoration: none;
     font-size: 11px;
     font-weight: 700;
-    transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease;
 }
 
 .app-rail-link:hover,
 .app-rail-link.active {
-    transform: translateY(-1px);
     background: rgba(238, 108, 77, 0.12);
     color: #d4553b;
 }
 
 .app-rail-icon {
-    font-size: 20px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+}
+
+.app-rail-icon svg {
+    width: 20px;
+    height: 20px;
 }
 
 .app-topbar {
@@ -114,7 +118,7 @@ body.app-shell-enabled {
 .app-topbar-pill {
     min-height: 34px;
     padding: 0 13px;
-    border-radius: 999px;
+    border-radius: 6px;
     border: 1px solid rgba(60, 45, 30, 0.10);
     background: #ffffff;
     color: #3a2e24;
@@ -148,7 +152,7 @@ body.app-shell-enabled {
         justify-content: center;
         border-right: none;
         border-top: 1px solid rgba(60, 45, 30, 0.10);
-        box-shadow: 0 -8px 28px rgba(80, 55, 30, 0.08);
+        box-shadow: 0 -4px 14px rgba(80, 55, 30, 0.06);
     }
 
     .app-rail-brand {
@@ -165,7 +169,7 @@ body.app-shell-enabled {
 
     .app-rail-link {
         padding: 7px 3px;
-        border-radius: 14px;
+        border-radius: 6px;
         font-size: 10px;
     }
 

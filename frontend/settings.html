@@ -4,35 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>桌宠设置 - QAgent Pet</title>
-    <link rel="stylesheet" href="css/shell.css?v=1">
-    <link rel="stylesheet" href="css/styles.css?v=4">
-    <link rel="stylesheet" href="css/settings.css?v=1">
+    <link rel="stylesheet" href="css/shell.css?v=3">
+    <link rel="stylesheet" href="css/styles.css?v=6">
+    <link rel="stylesheet" href="css/settings.css?v=2">
 </head>
 <body>
     <main class="settings-page">
         <header class="settings-header">
-            <span class="eyebrow">桌面软件概念入口</span>
+            <span class="eyebrow">桌面应用设置</span>
             <h1>桌宠与本地软件设置</h1>
-            <p>这些选项用于提前验证桌宠交互语义。真正的托盘、开机自启和本地数据目录会在 Electron 桌宠 MVP 中接入。</p>
+            <p>管理桌宠提醒、AI 服务和本地数据。Electron 版本会把聊天、记忆与关系数据保存在系统用户目录。</p>
         </header>
 
         <section class="settings-grid">
             <article class="setting-card primary-card">
                 <h2>桌宠模式</h2>
-                <p>预览未来透明置顶桌宠窗口、轻气泡提醒与点击展开完整聊天的交互。</p>
-                <a class="setting-action" href="desktop_pet.html">打开桌宠预览</a>
+                <p>Electron 版本支持透明置顶桌宠、轻气泡、托盘驻留和点击展开聊天。</p>
+                <button id="open-desktop-pet-btn" class="setting-toggle enabled">显示桌宠</button>
             </article>
 
             <article class="setting-card">
                 <h2>勿扰模式</h2>
-                <p>开启后，未来桌宠主动提醒会静默；当前 Web 端会保存此偏好。</p>
+                <p>开启后主动提醒保持静默，桌宠和托盘仍会继续运行。</p>
                 <button id="dnd-setting-btn" class="setting-toggle">勿扰：关</button>
             </article>
 
             <article class="setting-card">
                 <h2>托盘与通知</h2>
-                <p>关闭到托盘、系统通知、气泡频率控制将在桌宠 MVP 中启用。</p>
-                <span class="setting-badge">即将接入 Electron</span>
+                <p>关闭桌宠窗口后应用继续在托盘驻留，可通过右键菜单再次显示。</p>
+                <span class="setting-badge">Electron 已启用</span>
             </article>
 
             <article class="setting-card">
@@ -43,33 +43,96 @@
 
             <article class="setting-card">
                 <h2>数据目录</h2>
-                <p>当前开发模式仍使用项目内 SQLite；桌宠阶段会迁移到用户应用数据目录。</p>
-                <code>%APPDATA%/QAgentPet/</code>
+                <p>数据库、桌宠配置和运行日志保存在当前系统用户目录，升级应用不会覆盖。</p>
+                <code id="data-directory-path">浏览器模式：项目目录</code>
+                <button id="open-data-directory-btn" class="setting-toggle">打开数据目录</button>
             </article>
 
             <article class="setting-card">
-                <h2>版本信息</h2>
-                <p>QAgent Pet Core + Web 控制中心。</p>
-                <strong>Web Phase 1</strong>
+                <h2>AI 服务</h2>
+                <p id="runtime-status">浏览器模式使用项目 .env 配置。</p>
+                <button id="open-ai-settings-btn" class="setting-toggle">配置 AI 服务</button>
+                <strong id="version-label">QAgent Pet Core + Web</strong>
+            </article>
+
+            <article class="setting-card primary-card">
+                <h2>主动陪伴</h2>
+                <p>管理日程提醒、惦记回访和桌面气泡。日程提醒仍会在统一规则下克制触达。</p>
+                <button id="proactive-setting-btn" class="setting-toggle">加载中…</button>
+                <small id="proactive-setting-status"></small>
             </article>
         </section>
     </main>
 
-    <script src="js/shell.js?v=1"></script>
+    <script src="js/shell.js?v=4"></script>
+    <script src="js/api.js?v=4"></script>
     <script>
         initAppShell('settings');
         const btn = document.getElementById('dnd-setting-btn');
-        const sync = () => {
-            const enabled = localStorage.getItem('qagent_dnd_mode') === 'true';
+        const sync = async () => {
+            let enabled = localStorage.getItem('qagent_dnd_mode') === 'true';
+            if (window.desktopAPI?.getConfig) {
+                const config = await window.desktopAPI.getConfig();
+                enabled = Boolean(config.dnd);
+                localStorage.setItem('qagent_dnd_mode', String(enabled));
+            }
             btn.textContent = enabled ? '勿扰：开' : '勿扰：关';
             btn.classList.toggle('enabled', enabled);
         };
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const enabled = localStorage.getItem('qagent_dnd_mode') === 'true';
             localStorage.setItem('qagent_dnd_mode', String(!enabled));
-            sync();
+            if (window.desktopAPI?.setConfig) {
+                await window.desktopAPI.setConfig({ dnd: !enabled });
+            }
+            await sync();
         });
+
+        document.getElementById('open-desktop-pet-btn').addEventListener('click', () => {
+            if (window.desktopAPI?.showPet) window.desktopAPI.showPet();
+            else window.location.href = 'desktop_pet.html';
+        });
+
+        const dataButton = document.getElementById('open-data-directory-btn');
+        const aiButton = document.getElementById('open-ai-settings-btn');
+        if (window.desktopAPI?.getRuntimeInfo) {
+            window.desktopAPI.getRuntimeInfo().then((info) => {
+                const path = document.getElementById('data-directory-path');
+                path.textContent = info.data_dir;
+                path.title = info.data_dir;
+                document.getElementById('runtime-status').textContent = info.configured
+                    ? `已配置 ${info.llm_model}`
+                    : '尚未配置 AI 服务';
+                document.getElementById('version-label').textContent = `QAgent Pet ${info.app_version}`;
+            });
+            dataButton.addEventListener('click', () => window.desktopAPI.openDataDir());
+            aiButton.addEventListener('click', () => window.desktopAPI.openSetup());
+        } else {
+            dataButton.disabled = true;
+            aiButton.disabled = true;
+        }
+
         sync();
+
+        const proactiveButton = document.getElementById('proactive-setting-btn');
+        const proactiveStatus = document.getElementById('proactive-setting-status');
+        let proactiveSettings = null;
+        const syncProactive = async () => {
+            try {
+                proactiveSettings = await API.getProactiveSettings();
+                proactiveButton.textContent = proactiveSettings.enabled ? '主动陪伴：开' : '主动陪伴：关';
+                proactiveButton.classList.toggle('enabled', Boolean(proactiveSettings.enabled));
+                proactiveStatus.textContent = `勿扰 ${proactiveSettings.quiet_start}-${proactiveSettings.quiet_end} · 每日普通互动 ${proactiveSettings.max_general_per_day} 次`;
+            } catch (error) { proactiveButton.textContent = '浏览器模式不可用'; proactiveStatus.textContent = error.message; }
+        };
+        proactiveButton.addEventListener('click', async () => {
+            if (!proactiveSettings) return;
+            proactiveButton.disabled = true;
+            await API.updateProactiveSettings({ ...proactiveSettings, enabled: !proactiveSettings.enabled });
+            proactiveButton.disabled = false;
+            await syncProactive();
+        });
+        syncProactive();
     </script>
 </body>
 </html>

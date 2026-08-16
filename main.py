@@ -1,7 +1,14 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def _resource_root() -> str:
+    """Return bundled resources under PyInstaller, or the source root in dev."""
+    return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+
+APP_ROOT = _resource_root()
+sys.path.insert(0, APP_ROOT)
 
 # Workaround: starlette.Config 在 Windows 默认用 GBK 编码打开 .env 文件，
 # 如果 .env 包含中文注释会抛出 UnicodeDecodeError。猴子补丁强制使用 UTF-8。
@@ -27,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
-from backend.routers import sessions_router, chat_router
+from backend.routers import sessions_router, chat_router, proactive_router, schedules_router, concerns_router, leisure_router
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.routers.visits import router as visits_router
 from backend.routers.learning import router as learning_router
@@ -63,7 +70,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-User-Id"],
 )
 
@@ -89,9 +96,13 @@ app.include_router(chat_router)
 app.include_router(custom_pets_router)
 app.include_router(visits_router)
 app.include_router(learning_router)
+app.include_router(proactive_router)
+app.include_router(schedules_router)
+app.include_router(concerns_router)
+app.include_router(leisure_router)
 
 # 挂载静态文件目录
-frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
+frontend_path = os.getenv("QAGENT_FRONTEND_DIR", os.path.join(APP_ROOT, "frontend"))
 app.mount("/frontend", StaticFiles(directory=frontend_path), name="frontend")
 
 
@@ -102,7 +113,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "2.0.0"}
+    return {"status": "healthy", "app": "qagent-pet", "version": "2.0.0"}
 
 
 
