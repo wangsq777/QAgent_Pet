@@ -7,9 +7,20 @@ const APP_NAME = 'QAgent Pet';
 const DEFAULT_PET_TYPE = 'hot_dog';
 const PRESET_PETS = ['hot_dog', 'cold_cat', 'mouse'];
 const HEALTH_PORTS = [8080, 10000];
+// 摸鱼·视频小窗默认载入的平台桌面版(网页版)。独立 partition 保存登录态,与主面板隔离。
+// 桌面版无「打开App」横幅、视频在浏览器内直接播放;不会随小窗收缩重排,可用浮条缩放按钮手动适配。
+const FEED_DEFAULT_URL = 'https://www.bilibili.com';
+// 摸鱼·视频小窗可切换的网页渠道(B站 / 小红书 / 抖音),与 feed_preload.js 的导航栏保持一致。
+const FEED_CHANNELS = {
+  bilibili: 'https://www.bilibili.com',
+  xiaohongshu: 'https://www.xiaohongshu.com/explore',
+  douyin: 'https://www.douyin.com'
+};
 
 let petWindow = null;
 let chatWindow = null;
+let novelWindow = null;
+let feedWindow = null;
 let webWindow = null;
 let setupWindow = null;
 let tray = null;
@@ -283,7 +294,6 @@ function backendEnvironment() {
     ...process.env,
     QAGENT_DATA_DIR: app.getPath('userData'),
     QAGENT_ENV_FILE: effectiveEnvPath(),
-    QAGENT_FRONTEND_DIR: frontendRoot,
     ...(fs.existsSync(legacyDatabase) ? { QAGENT_LEGACY_DATABASE_PATH: legacyDatabase } : {})
   };
 }
@@ -419,6 +429,17 @@ function buildAppMenu() {
   const template = [
     { label: '显示桌宠', click: () => showPetWindow() },
     { label: '打开完整 Web 面板', click: () => openWebPanel() },
+    { label: '摸鱼·小说阅读', click: () => toggleNovelWindow() },
+    {
+      label: '摸鱼·刷视频',
+      submenu: [
+        { label: 'B站', click: () => openFeedChannel('bilibili') },
+        { label: '小红书', click: () => openFeedChannel('xiaohongshu') },
+        { label: '抖音', click: () => openFeedChannel('douyin') },
+        { type: 'separator' },
+        { label: '显示/隐藏视频小窗', click: () => toggleFeedWindow() }
+      ]
+    },
     { label: 'AI 服务设置', click: () => createSetupWindow() },
     { label: '打开数据目录', click: () => shell.openPath(app.getPath('userData')) },
     { type: 'separator' },
@@ -504,8 +525,8 @@ function createSetupWindow({ required = false } = {}) {
 
 function createPetWindow() {
   petWindow = new BrowserWindow({
-    width: 190,
-    height: 220,
+    width: 152,
+    height: 176,
     transparent: true,
     frame: false,
     resizable: false,
@@ -583,6 +604,168 @@ function toggleChatWindow() {
   chatWindow.focus();
 }
 
+function createNovelWindow() {
+  if (novelWindow && !novelWindow.isDestroyed()) return novelWindow;
+
+  novelWindow = new BrowserWindow({
+    width: 420,
+    height: 560,
+    show: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    title: '摸鱼·小说阅读',
+    webPreferences: {
+      preload: path.join(desktopRoot, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  novelWindow.setAlwaysOnTop(true, 'floating');
+  novelWindow.loadFile(path.join(rendererRoot, 'novel.html'));
+  novelWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      novelWindow.hide();
+    }
+  });
+  novelWindow.on('closed', () => {
+    novelWindow = null;
+  });
+}
+
+function toggleNovelWindow() {
+  if (!novelWindow) createNovelWindow();
+
+  if (novelWindow.isVisible()) {
+    novelWindow.hide();
+    return;
+  }
+
+  const petBounds = petWindow?.getBounds();
+  if (petBounds) {
+    novelWindow.setPosition(Math.max(0, petBounds.x - 440), Math.max(0, petBounds.y - 60));
+  }
+  novelWindow.show();
+  novelWindow.focus();
+}
+
+let pendingNovelBookId = null;
+
+function showNovelWindow() {
+  if (!novelWindow) createNovelWindow();
+  if (!novelWindow.isVisible()) {
+    const petBounds = petWindow?.getBounds();
+    if (petBounds) {
+      novelWindow.setPosition(Math.max(0, petBounds.x - 440), Math.max(0, petBounds.y - 60));
+    }
+    novelWindow.show();
+  }
+  novelWindow.focus();
+}
+
+function openNovelBook(bookId) {
+  // 从 Web 面板跳转「桌面阅读」:显示阅读窗并把书交给渲染进程。
+  // 窗口可能尚未加载完,先把 bookId 暂存,加载完成后再投递。
+  pendingNovelBookId = bookId || null;
+  if (!novelWindow) createNovelWindow();
+  const deliver = () => {
+    if (pendingNovelBookId && novelWindow && !novelWindow.isDestroyed()) {
+      novelWindow.webContents.send('novel-open-book', pendingNovelBookId);
+      pendingNovelBookId = null;
+    }
+  };
+  if (novelWindow.webContents.isLoading()) {
+    novelWindow.webContents.once('did-finish-load', deliver);
+  } else {
+    deliver();
+  }
+  showNovelWindow();
+}
+
+// 摸鱼·视频小窗:置顶、可拖拽、可缩到很小的小窗,直接加载外部视频站页面。
+// 登录态保存在独立 partition(persist:feed) 中,与主面板隔离;不碰接口与凭证。
+function createFeedWindow() {
+  if (feedWindow && !feedWindow.isDestroyed()) return feedWindow;
+
+  feedWindow = new BrowserWindow({
+    width: 640,
+    height: 480,
+    minWidth: 400,
+    minHeight: 300,
+    show: false,
+    frame: false,
+    resizable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    title: '摸鱼·视频小窗',
+    webPreferences: {
+      preload: path.join(desktopRoot, 'feed_preload.js'),
+      partition: 'persist:feed',
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  feedWindow.setAlwaysOnTop(true, 'floating');
+  feedWindow.loadURL(FEED_DEFAULT_URL);
+  // 新窗口/弹窗一律留在小窗内打开,避免登录或播放流程被弹到外部中断。
+  const win = feedWindow;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      win.webContents.loadURL(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+  // 关闭即真关闭:不拦截 close,销毁渲染进程即停止后台视频/网络播放;
+  // 之后想再看,从托盘/Web 面板重新点入口会重建窗口。
+  feedWindow.on('closed', () => {
+    feedWindow = null;
+  });
+  return feedWindow;
+}
+
+function showFeedWindow() {
+  if (!feedWindow || feedWindow.isDestroyed()) createFeedWindow();
+  if (!feedWindow.isVisible()) {
+    const petBounds = petWindow?.getBounds();
+    if (petBounds) {
+      // 按实际窗口宽度摆放:让弹窗右缘落在桌宠左缘附近,避免 520 是给旧尺寸写死的。
+      const width = feedWindow.getBounds().width;
+      feedWindow.setPosition(Math.max(0, petBounds.x - (width - 80)), Math.max(0, petBounds.y - 120));
+    }
+  }
+  feedWindow.show();
+  feedWindow.focus();
+}
+
+function toggleFeedWindow() {
+  if (!feedWindow || feedWindow.isDestroyed()) {
+    createFeedWindow();
+  }
+  if (feedWindow.isVisible()) {
+    feedWindow.hide();
+    return;
+  }
+  showFeedWindow();
+}
+
+// 打开视频小窗并直达指定网页渠道(B站/小红书/抖音)。托盘与 IPC 共用。
+function openFeedChannel(channel) {
+  showFeedWindow();
+  const url = FEED_CHANNELS[channel];
+  if (url && feedWindow && !feedWindow.isDestroyed()) {
+    feedWindow.webContents.loadURL(url).catch(() => {});
+  }
+}
+
 async function openWebPanel() {
   const backend = await ensureBackendReady();
   if (!backend.ok) {
@@ -604,11 +787,14 @@ async function openWebPanel() {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        // 本地面板从打包文件加载(file://)，需直连本机后端 API；仅此窗口关闭同源校验
+        webSecurity: false,
         additionalArguments: [
           `--qagent-user-id=${cfg.user_id || ''}`,
           `--qagent-session-id=${cfg.session_id || ''}`,
           `--qagent-pet-type=${cfg.pet_type || DEFAULT_PET_TYPE}`,
-          `--qagent-custom-pet-id=${cfg.custom_pet_id || ''}`
+          `--qagent-custom-pet-id=${cfg.custom_pet_id || ''}`,
+          `--qagent-api-base=${baseUrl}`
         ]
       }
     });
@@ -618,7 +804,7 @@ async function openWebPanel() {
     });
   }
 
-  webWindow.loadURL(`${baseUrl}/frontend/chat.html`);
+  webWindow.loadFile(path.join(projectRoot, 'frontend', 'chat.html'));
   webWindow.show();
   webWindow.focus();
 }
@@ -739,6 +925,92 @@ function registerIpc() {
   ipcMain.handle('api:proactive-delivered', async (_event, eventId, claimToken) => requestJson(`/api/proactive/events/${eventId}/delivered`, { method: 'POST', body: { claim_token: claimToken } }));
   ipcMain.handle('api:proactive-opened', async (_event, eventId, claimToken) => requestJson(`/api/proactive/events/${eventId}/opened`, { method: 'POST', body: { claim_token: claimToken } }));
   ipcMain.handle('api:proactive-action', async (_event, eventId, action, claimToken) => requestJson(`/api/proactive/events/${eventId}/action`, { method: 'POST', body: { action, claim_token: claimToken } }));
+
+  // 摸鱼·小说阅读窗
+  ipcMain.handle('app:open-novel', async () => { showNovelWindow(); return true; });
+  ipcMain.handle('app:open-novel-book', async (_event, bookId) => {
+    openNovelBook(typeof bookId === 'string' ? bookId : null);
+    return true;
+  });
+  ipcMain.handle('app:hide-novel', async () => {
+    if (novelWindow && !novelWindow.isDestroyed()) novelWindow.hide();
+    return true;
+  });
+  ipcMain.handle('app:novel-import', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '导入小说',
+      filters: [{ name: '小说文件', extensions: ['txt', 'epub', 'docx'] }],
+      properties: ['openFile']
+    });
+    if (canceled || !filePaths.length) return { canceled: true };
+    const filePath = filePaths[0];
+    const cfg = await ensureSession();
+    const bytes = fs.readFileSync(filePath);
+    const filename = path.basename(filePath);
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'application/octet-stream' }), filename);
+    const response = await fetch(`${getBackendUrl()}/api/leisure/novels/import`, {
+      method: 'POST',
+      headers: { 'X-User-Id': cfg.user_id || 'anonymous' },
+      body: form
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.detail || `HTTP ${response.status}`);
+    }
+    return data;
+  });
+
+  // 摸鱼·视频小窗
+  ipcMain.handle('app:open-feed', async () => { showFeedWindow(); return true; });
+  // 打开小窗并直达指定渠道(B站/小红书/抖音),供托盘/Web 面板调用。
+  ipcMain.handle('app:open-feed-channel', async (_event, channel) => { openFeedChannel(channel); return true; });
+  // 真正关闭小窗:立即销毁渲染进程,停止后台视频/网络播放。
+  ipcMain.handle('app:close-feed', async () => {
+    if (feedWindow && !feedWindow.isDestroyed()) feedWindow.destroy();
+    return true;
+  });
+  ipcMain.handle('feed:nav', async (_event, kind) => {
+    if (!feedWindow || feedWindow.isDestroyed()) return false;
+    const contents = feedWindow.webContents;
+    if (kind === 'back') contents.goBack();
+    else if (kind === 'forward') contents.goForward();
+    else if (kind === 'reload') contents.reload();
+    return true;
+  });
+  ipcMain.handle('feed:navigate', async (_event, url) => {
+    if (!feedWindow || feedWindow.isDestroyed() || typeof url !== 'string') return false;
+    feedWindow.webContents.loadURL(url).catch(() => {});
+    return true;
+  });
+  ipcMain.handle('feed:set-pinned', async (_event, pinned) => {
+    if (feedWindow && !feedWindow.isDestroyed()) feedWindow.setAlwaysOnTop(Boolean(pinned), 'floating');
+    return feedWindow && !feedWindow.isDestroyed() ? feedWindow.isAlwaysOnTop() : false;
+  });
+  ipcMain.handle('feed:zoom', async (_event, action) => {
+    if (!feedWindow || feedWindow.isDestroyed()) return null;
+    const contents = feedWindow.webContents;
+    const current = contents.getZoomFactor();
+    const next = action === 'reset'
+      ? 1
+      : Math.max(0.3, Math.min(2, current + (action === 'in' ? 0.2 : -0.2)));
+    contents.setZoomFactor(next);
+    return next;
+  });
+
+  const novelApi = (method, path, body) => requestJson(path, { method, body });
+  ipcMain.handle('api:novel-list', async () => novelApi('GET', '/api/leisure/novels'));
+  ipcMain.handle('api:novel-mine', async () => novelApi('GET', '/api/leisure/novels/mine'));
+  ipcMain.handle('api:novel-chapters', async (_event, bookId) => novelApi('GET', `/api/leisure/novels/${bookId}/chapters`));
+  ipcMain.handle('api:novel-chapter', async (_event, bookId, chapterId) => novelApi('GET', `/api/leisure/novels/${bookId}/chapters/${chapterId}`));
+  ipcMain.handle('api:novel-progress-get', async (_event, bookId) => novelApi('GET', `/api/leisure/novels/${bookId}/progress`));
+  ipcMain.handle('api:novel-progress-save', async (_event, bookId, body) => novelApi('PUT', `/api/leisure/novels/${bookId}/progress`, body));
+  ipcMain.handle('api:novel-session-open', async (_event, bookId) => {
+    await ensureSession();
+    return novelApi('POST', '/api/leisure/sessions', { module_id: 'builtin.novel', content_ref_id: bookId });
+  });
+  ipcMain.handle('api:novel-session-close', async (_event, sessionId) => novelApi('POST', `/api/leisure/sessions/${sessionId}/close?reason=user_exit`));
+  ipcMain.handle('api:novel-delete', async (_event, bookId) => novelApi('DELETE', `/api/leisure/novels/${bookId}`));
 }
 
 async function startCoreApp() {

@@ -116,6 +116,9 @@ async function maybeProactiveGreeting() {
 
 async function init() {
   petButton.addEventListener('pointerdown', (event) => {
+    // 只有主键(左键)才进入拖拽;右键会弹原生菜单,菜单吞掉 pointerup
+    // 会导致 dragState 残留、窗口跟着鼠标走。
+    if (event.button !== 0) return;
     clickMoved = false;
     dragState = { x: event.screenX, y: event.screenY };
     petButton.setPointerCapture(event.pointerId);
@@ -130,10 +133,14 @@ async function init() {
     await window.desktopAPI.movePet(dx, dy);
   });
   petButton.addEventListener('pointerup', (event) => {
+    if (event.button !== 0) return;
     dragState = null;
     try { petButton.releasePointerCapture(event.pointerId); } catch (error) {}
     if (!clickMoved) window.desktopAPI.toggleChat();
   });
+  // 右键菜单弹出或窗口失焦时,强制结束拖拽状态(兜底,防 pointerup 丢失)
+  petButton.addEventListener('contextmenu', () => { dragState = null; });
+  window.addEventListener('blur', () => { dragState = null; });
   petBubble.addEventListener('click', () => window.desktopAPI.toggleChat());
 
   window.desktopAPI.onProactiveEvent(async (event) => {

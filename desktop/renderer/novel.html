@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>摸鱼·小说阅读</title>
+  <link rel="stylesheet" href="novel.css">
+</head>
+<body>
+  <main class="novel-shell">
+    <!-- 顶部拖拽与控制栏 -->
+    <header class="novel-header" data-drag-region>
+      <div class="novel-title-wrap">
+        <span id="novel-book-title" class="novel-book-title">小说</span>
+      </div>
+      <div class="novel-controls">
+        <label class="opacity-control" title="背景透明度">
+          <span class="opacity-label">背景</span>
+          <input type="range" id="novel-bg-opacity" min="0.05" max="0.95" step="0.05" value="0.55">
+        </label>
+        <label class="opacity-control" title="文字透明度">
+          <span class="opacity-label">文字</span>
+          <input type="range" id="novel-text-opacity" min="0.2" max="1" step="0.05" value="0.92">
+        </label>
+        <button id="novel-back" class="icon-btn" type="button" title="返回书架" hidden>←</button>
+        <button id="novel-import" class="icon-btn" type="button" title="导入小说">+</button>
+        <button id="novel-close" class="icon-btn" type="button" title="隐藏窗口">×</button>
+      </div>
+    </header>
+
+    <!-- 书架 -->
+    <section id="novel-library" class="novel-library">
+      <div id="novel-library-status" class="panel-status">正在加载…</div>
+      <ul id="novel-book-list" class="book-list"></ul>
+    </section>
+
+    <!-- 阅读器 -->
+    <section id="novel-reader" class="novel-reader" hidden>
+      <div class="reader-toolbar">
+        <span id="reader-chapter-title" class="chapter-title">章节</span>
+        <select id="chapter-select" class="chapter-select" aria-label="选择章节"></select>
+      </div>
+      <div class="reader-appearance">
+        <label class="appearance-control" title="文字大小">
+          <span class="opacity-label">字号</span>
+          <input type="range" id="novel-font-size" min="13" max="26" step="1" value="15">
+        </label>
+        <div class="color-swatches" role="group" aria-label="文字颜色">
+          <button type="button" class="swatch" data-text-rgb="245,245,250" style="--sw:245,245,250" title="月白"></button>
+          <button type="button" class="swatch" data-text-rgb="159,230,160" style="--sw:159,230,160" title="终端绿"></button>
+          <button type="button" class="swatch" data-text-rgb="255,212,121" style="--sw:255,212,121" title="暖黄"></button>
+          <button type="button" class="swatch" data-text-rgb="159,184,216" style="--sw:159,184,216" title="灰蓝"></button>
+          <button type="button" class="swatch" data-text-rgb="230,180,190" style="--sw:230,180,190" title="藕粉"></button>
+        </div>
+      </div>
+      <div id="reader-content" class="reader-content"></div>
+      <div class="reader-footer">
+        <button id="prev-chapter" type="button">上一章</button>
+        <span id="reader-progress" class="reader-progress"></span>
+        <button id="next-chapter" type="button">下一章</button>
+      </div>
+    </section>
+  </main>
+  <script src="novel.js"></script>
+</body>
+</html>

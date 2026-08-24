@@ -60,8 +60,18 @@
             <div id="leisure-library">
                 <div class="panel-heading">
                     <div><span class="section-label">短暂休息</span><h2>随手翻一点，停在哪里都算数</h2></div>
-                    <span id="leisure-status" class="panel-status">正在加载…</span>
+                    <div class="panel-heading-actions">
+                        <select id="feed-channel-select" class="ghost-command" title="在桌宠视频小窗里刷视频（需桌面端）" hidden>
+                            <option value="" selected disabled>📺 桌面刷视频…</option>
+                            <option value="bilibili">B站</option>
+                            <option value="xiaohongshu">小红书</option>
+                            <option value="douyin">抖音</option>
+                        </select>
+                        <button id="import-novel-btn" class="ghost-command" type="button" title="导入 TXT / EPUB / DOCX 小说">📥 导入小说</button>
+                        <span id="leisure-status" class="panel-status">正在加载…</span>
+                    </div>
                 </div>
+                <input type="file" id="novel-file-input" accept=".txt,.epub,.docx" hidden>
                 <div id="book-list" class="book-list" aria-live="polite"></div>
             </div>
 
@@ -70,6 +80,7 @@
                     <button id="close-reader" class="icon-command" type="button" title="返回书架" aria-label="返回书架">←</button>
                     <div><small id="reader-book-title">小说</small><strong id="reader-chapter-title">章节</strong></div>
                     <span id="reader-progress">1 / 1</span>
+                    <button id="desktop-read-btn" class="ghost-command" type="button" title="在桌宠隐蔽阅读窗中继续读" hidden>🖥 桌面阅读</button>
                 </header>
                 <div class="reader-controls" aria-label="阅读设置">
                     <label class="chapter-control">目录

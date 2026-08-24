@@ -123,6 +123,40 @@ def _set_db_file_permissions():
         logger.warning("Failed to set database file permissions: %s", e)
 
 
+async def _migrate_novel_books_for_import(db) -> None:
+    """Rebuild novel_books to allow user-imported content and owner scoping.
+
+    The original table constrained ``content_source='builtin'`` and had no
+    owner/format columns.  SQLite cannot alter a CHECK in place, so we rebuild
+    the table when the old schema is detected (missing ``owner_user_id``).
+    Idempotent: a no-op once the new columns exist.
+    """
+    cursor = await db.execute("PRAGMA table_info(novel_books)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "owner_user_id" in columns:
+        return  # already migrated (or freshly created with the new schema)
+
+    await db.execute("ALTER TABLE novel_books RENAME TO novel_books_legacy")
+    await db.execute("""
+        CREATE TABLE novel_books (
+            book_id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '',
+            content_source TEXT NOT NULL DEFAULT 'builtin' CHECK(content_source IN ('builtin','user')),
+            content_version TEXT NOT NULL DEFAULT '1.0.0',
+            status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published','hidden')),
+            owner_user_id TEXT, source_format TEXT, source_filename TEXT,
+            created_at_utc DATETIME NOT NULL, updated_at_utc DATETIME NOT NULL
+        )
+    """)
+    await db.execute("""
+        INSERT INTO novel_books(book_id,title,author,description,cover_url,content_source,content_version,status,owner_user_id,source_format,source_filename,created_at_utc,updated_at_utc)
+        SELECT book_id,title,author,description,cover_url,content_source,content_version,status,NULL,NULL,NULL,created_at_utc,updated_at_utc
+        FROM novel_books_legacy
+    """)
+    await db.execute("DROP TABLE novel_books_legacy")
+    logger.info("Migrated novel_books: relaxed content_source and added owner columns")
+
+
 async def init_database():
     _ensure_database_parent()
     migrate_legacy_database(DATABASE_PATH)
@@ -331,12 +365,17 @@ async def init_database():
             CREATE TABLE IF NOT EXISTS novel_books (
                 book_id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT NOT NULL DEFAULT '',
                 description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '',
-                content_source TEXT NOT NULL DEFAULT 'builtin' CHECK(content_source = 'builtin'),
+                content_source TEXT NOT NULL DEFAULT 'builtin' CHECK(content_source IN ('builtin','user')),
                 content_version TEXT NOT NULL DEFAULT '1.0.0',
                 status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published','hidden')),
+                owner_user_id TEXT, source_format TEXT, source_filename TEXT,
                 created_at_utc DATETIME NOT NULL, updated_at_utc DATETIME NOT NULL
             )
         """)
+        # 迁移旧的 novel_books：旧表 CHECK 限制 content_source='builtin' 且缺少
+        # owner_user_id / source_format / source_filename 列。SQLite 无法原地改 CHECK，
+        # 因此用表重建：检测到旧表缺列时，新建带新 schema 的表、拷贝数据、替换。
+        await _migrate_novel_books_for_import(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS novel_chapters (
                 chapter_id TEXT PRIMARY KEY, book_id TEXT NOT NULL, chapter_index INTEGER NOT NULL,

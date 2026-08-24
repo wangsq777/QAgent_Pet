@@ -1,10 +1,15 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from backend.database import get_db
 from backend.schemas import LeisureSessionCreateRequest, LeisureSettingsRequest, NovelProgressRequest
 from backend.services.leisure_session_service import close_session, open_session, pause_session, resume_session
 from backend.services.module_registry import get_module, list_modules
-from backend.services.novel_service import get_book, save_progress
+from backend.services.novel_import_service import NovelImportError, parse_novel
+from backend.services.novel_service import save_progress
+from backend.services.novel_storage_service import delete_user_book, import_book, list_user_books
 from backend.services.time_service import utc_iso
+
+MAX_IMPORT_BYTES = 20 * 1024 * 1024  # 20MB cap; the global 1MB limit is bypassed for this path
+SUPPORTED_IMPORT_EXTS = (".txt", ".epub", ".docx")
 
 router = APIRouter(prefix="/api/leisure", tags=["leisure"])
 
@@ -49,6 +54,16 @@ async def _session_action(session_id: str, request: Request, operation):
             raise HTTPException(status_code=409, detail=str(exc))
 
 
+async def _get_visible_book(db, book_id: str, user_id: str):
+    """Built-in books are shared; imported books are owner-scoped."""
+    cursor = await db.execute(
+        "SELECT * FROM novel_books WHERE book_id=? AND status='published' "
+        "AND (owner_user_id IS NULL OR owner_user_id=?)",
+        (book_id, user_id),
+    )
+    return await cursor.fetchone()
+
+
 @router.post("/sessions/{session_id}/pause")
 async def pause(session_id: str, request: Request):
     return await _session_action(session_id, request, pause_session)
@@ -65,34 +80,79 @@ async def close(session_id: str, request: Request, reason: str = "user_exit"):
 
 
 @router.get("/novels")
-async def novels():
+async def novels(request: Request):
     async with get_db() as db:
-        cursor = await db.execute("SELECT * FROM novel_books WHERE status='published' ORDER BY title")
+        # Built-in books (owner_user_id IS NULL) are shared; imported books are
+        # only visible to their owner.
+        cursor = await db.execute(
+            "SELECT * FROM novel_books WHERE status='published' "
+            "AND (owner_user_id IS NULL OR owner_user_id=?) ORDER BY title",
+            (request.state.user_id,),
+        )
         return {"books": [dict(row) for row in await cursor.fetchall()]}
 
 
-@router.get("/novels/{book_id}")
-async def novel(book_id: str):
+@router.get("/novels/mine")
+async def my_imports(request: Request):
     async with get_db() as db:
-        row = await get_book(db, book_id)
+        return {"books": await list_user_books(db, request.state.user_id)}
+
+
+@router.post("/novels/import")
+async def import_novel(request: Request, file: UploadFile = File(...)):
+    filename = file.filename or ""
+    if not filename.lower().endswith(SUPPORTED_IMPORT_EXTS):
+        raise HTTPException(status_code=400, detail="仅支持 TXT / EPUB / DOCX 格式")
+    raw = await file.read()
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，上限 20MB")
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件为空")
+    try:
+        parsed = parse_novel(raw, filename=filename)
+    except NovelImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - surface a clear message for bad files
+        raise HTTPException(status_code=422, detail=f"解析失败：{exc}")
+    async with get_db() as db:
+        result = await import_book(db, user_id=request.state.user_id, parsed=parsed, source_filename=filename)
+        return {"book": result}
+
+
+@router.delete("/novels/{book_id}")
+async def remove_import(book_id: str, request: Request):
+    async with get_db() as db:
+        try:
+            await delete_user_book(db, request.state.user_id, book_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Book not found")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="无法删除内置书籍或不属于你的导入书")
+        return {"ok": True}
+
+
+@router.get("/novels/{book_id}")
+async def novel(book_id: str, request: Request):
+    async with get_db() as db:
+        row = await _get_visible_book(db, book_id, request.state.user_id)
         if not row:
             raise HTTPException(status_code=404, detail="Book not found")
         return dict(row)
 
 
 @router.get("/novels/{book_id}/chapters")
-async def chapters(book_id: str):
+async def chapters(book_id: str, request: Request):
     async with get_db() as db:
-        if not await get_book(db, book_id):
+        if not await _get_visible_book(db, book_id, request.state.user_id):
             raise HTTPException(status_code=404, detail="Book not found")
         cursor = await db.execute("SELECT chapter_id,book_id,chapter_index,title,word_count,created_at_utc,updated_at_utc FROM novel_chapters WHERE book_id=? ORDER BY chapter_index", (book_id,))
         return {"chapters": [dict(row) for row in await cursor.fetchall()]}
 
 
 @router.get("/novels/{book_id}/chapters/{chapter_id}")
-async def chapter(book_id: str, chapter_id: str):
+async def chapter(book_id: str, chapter_id: str, request: Request):
     async with get_db() as db:
-        if not await get_book(db, book_id):
+        if not await _get_visible_book(db, book_id, request.state.user_id):
             raise HTTPException(status_code=404, detail="Book not found")
         cursor = await db.execute("SELECT * FROM novel_chapters WHERE book_id=? AND chapter_id=?", (book_id, chapter_id))
         row = await cursor.fetchone()
@@ -104,7 +164,7 @@ async def chapter(book_id: str, chapter_id: str):
 @router.get("/novels/{book_id}/progress")
 async def progress(book_id: str, request: Request):
     async with get_db() as db:
-        if not await get_book(db, book_id):
+        if not await _get_visible_book(db, book_id, request.state.user_id):
             raise HTTPException(status_code=404, detail="Book not found")
         cursor = await db.execute("SELECT * FROM novel_progress WHERE user_id=? AND book_id=?", (request.state.user_id, book_id))
         row = await cursor.fetchone()
@@ -114,6 +174,8 @@ async def progress(book_id: str, request: Request):
 @router.put("/novels/{book_id}/progress")
 async def update_progress(book_id: str, body: NovelProgressRequest, request: Request):
     async with get_db() as db:
+        if not await _get_visible_book(db, book_id, request.state.user_id):
+            raise HTTPException(status_code=404, detail="Book not found")
         try:
             return await save_progress(db, user_id=request.state.user_id, book_id=book_id, chapter_id=body.chapter_id, position=body.position, percent=body.percent, content_version=body.content_version, client_updated_at_utc=body.client_updated_at_utc, request_id=body.request_id)
         except KeyError:
@@ -125,7 +187,7 @@ async def update_progress(book_id: str, body: NovelProgressRequest, request: Req
 @router.post("/novels/{book_id}/shelf")
 async def shelf_add(book_id: str, request: Request):
     async with get_db() as db:
-        if not await get_book(db, book_id):
+        if not await _get_visible_book(db, book_id, request.state.user_id):
             raise HTTPException(status_code=404, detail="Book not found")
         await db.execute("INSERT INTO novel_shelves(user_id,book_id,added_at_utc,updated_at_utc) VALUES(?,?,?,?) ON CONFLICT(user_id,book_id) DO UPDATE SET updated_at_utc=excluded.updated_at_utc", (request.state.user_id, book_id, utc_iso(), utc_iso()))
         await db.commit()

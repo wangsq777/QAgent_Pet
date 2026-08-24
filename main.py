@@ -30,8 +30,6 @@ _sc.Config._read_file = _utf8_read_file
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
 from backend.routers import sessions_router, chat_router, proactive_router, schedules_router, concerns_router, leisure_router
@@ -76,9 +74,11 @@ app.add_middleware(
 
 app.add_middleware(AuthMiddleware)
 
-# 请求体大小限制（1MB）
+# 请求体大小限制（1MB）；小说导入路径单独豁免，上限由路由层控制
 class MaxBodySizeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.url.path.endswith("/novels/import"):
+            return await call_next(request)
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > 1024 * 1024:  # 1MB
             raise HTTPException(status_code=413, detail="Request too large")
@@ -101,16 +101,7 @@ app.include_router(schedules_router)
 app.include_router(concerns_router)
 app.include_router(leisure_router)
 
-# 挂载静态文件目录
-frontend_path = os.getenv("QAGENT_FRONTEND_DIR", os.path.join(APP_ROOT, "frontend"))
-app.mount("/frontend", StaticFiles(directory=frontend_path), name="frontend")
-
-
-@app.get("/")
-async def root():
-    return RedirectResponse(url="/frontend/index.html", status_code=307)
-
-
+# 纯桌面端：不再对外托管 web 前端，仅保留本地 API 服务
 @app.get("/health")
 async def health():
     return {"status": "healthy", "app": "qagent-pet", "version": "2.0.0"}
@@ -120,4 +111,5 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     from backend.config import settings
-    uvicorn.run(app, host="0.0.0.0", port=settings.PORT)
+    # 纯桌面端：仅监听本机回环地址，不对局域网/公网开放
+    uvicorn.run(app, host="127.0.0.1", port=settings.PORT)

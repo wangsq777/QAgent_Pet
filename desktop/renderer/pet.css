@@ -19,18 +19,18 @@ body {
   height: 100%;
   display: grid;
   place-items: center;
-  padding-top: 28px;
+  padding-top: 22px;
 }
 
 .pet-button {
-  width: 148px;
-  height: 158px;
+  width: 118px;
+  height: 126px;
   border: 0;
   padding: 0;
   background: transparent;
   display: grid;
   justify-items: center;
-  gap: 6px;
+  gap: 5px;
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
@@ -40,46 +40,46 @@ body {
 }
 
 .pet-image {
-  width: 126px;
-  height: 126px;
+  width: 100px;
+  height: 100px;
   object-fit: cover;
   border-radius: 50%;
-  padding: 8px;
+  padding: 6px;
   background: rgba(255, 255, 255, 0.9);
-  border: 3px solid rgba(238, 108, 77, 0.9);
-  box-shadow: 0 18px 44px rgba(80, 45, 20, 0.22);
+  border: 2px solid rgba(238, 108, 77, 0.9);
+  box-shadow: 0 14px 34px rgba(80, 45, 20, 0.22);
   animation: petBreath 2.2s ease-in-out infinite;
   pointer-events: none;
 }
 
 .pet-mood {
-  min-width: 54px;
-  padding: 4px 10px;
+  min-width: 44px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
   color: #8a5a2d;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 800;
-  box-shadow: 0 8px 22px rgba(80, 45, 20, 0.12);
+  box-shadow: 0 6px 18px rgba(80, 45, 20, 0.12);
   pointer-events: none;
 }
 
 .bubble {
   position: absolute;
-  top: 7px;
+  top: 5px;
   left: 50%;
   transform: translateX(-50%);
-  min-width: 54px;
-  min-height: 34px;
-  padding: 7px 14px;
+  min-width: 44px;
+  min-height: 28px;
+  padding: 6px 11px;
   border: 1px solid rgba(238, 108, 77, 0.26);
   border-radius: 999px;
   background: #fffaf5;
   color: #e76f51;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.04em;
-  box-shadow: 0 10px 28px rgba(80, 45, 20, 0.16);
+  box-shadow: 0 8px 22px rgba(80, 45, 20, 0.16);
   cursor: pointer;
   -webkit-app-region: no-drag;
   animation: bubbleFloat 2.1s ease-in-out infinite;
@@ -89,9 +89,9 @@ body {
   content: "";
   position: absolute;
   left: 50%;
-  bottom: -6px;
-  width: 11px;
-  height: 11px;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
   background: #fffaf5;
   border-right: 1px solid rgba(238, 108, 77, 0.26);
   border-bottom: 1px solid rgba(238, 108, 77, 0.26);

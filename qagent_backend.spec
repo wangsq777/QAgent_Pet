@@ -7,7 +7,7 @@ analysis = Analysis(
     [str(ROOT / "main.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[(str(ROOT / "frontend"), "frontend")],
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -160,15 +160,54 @@
         status.textContent = readingCount ? `${sortedBooks.length} 本读物 · ${readingCount} 本有进度` : `${sortedBooks.length} 本内置读物`;
     }
 
+    function canDesktopRead() {
+        return Boolean(window.desktopAPI && typeof window.desktopAPI.openNovelBook === 'function');
+    }
+
+    function canDesktopFeed() {
+        return Boolean(window.desktopAPI && typeof window.desktopAPI.openFeed === 'function');
+    }
+
+    function readOnDesktop(book) {
+        if (!canDesktopRead()) return;
+        window.desktopAPI.openNovelBook(book.book_id).catch(() => {});
+        const status = document.getElementById('leisure-status');
+        if (status) status.textContent = `《${book.title}》已在桌面阅读窗打开`;
+    }
+
     function renderBook(book) {
         const progress = state.progressByBook.get(book.book_id);
         const percent = progressPercent(progress);
         const buttonText = percent >= 100 ? '重新阅读' : percent > 0 ? '继续阅读' : '开始阅读';
         const progressText = percent >= 100 ? '已读完' : percent > 0 ? `已读 ${percent}%` : '还没开始';
+        const isImported = book.content_source === 'user';
+        const desktopBtn = canDesktopRead() ? '<button type="button" data-desktop>桌面阅读</button>' : '';
         const item = document.createElement('article');
         item.className = 'book-item';
-        item.innerHTML = `<div class="book-cover" aria-hidden="true">阅</div><div class="book-info"><small>${escapeHtml(book.author || 'QAgent')}</small><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.description || '')}</p><div class="book-progress"><div><span style="width:${percent}%"></span></div><small>${progressText}</small></div><button type="button">${buttonText}</button></div>`;
-        item.querySelector('button').addEventListener('click', () => openBook(book));
+        item.innerHTML = `<div class="book-cover" aria-hidden="true">阅</div><div class="book-info"><small>${escapeHtml(book.author || 'QAgent')}</small><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.description || '')}</p><div class="book-progress"><div><span style="width:${percent}%"></span></div><small>${progressText}</small></div><div class="book-actions"><button type="button" data-read>${buttonText}</button>${desktopBtn}${isImported ? '<button type="button" class="danger-command" data-delete>删除</button>' : ''}</div></div>`;
+        item.querySelector('[data-read]').addEventListener('click', () => openBook(book));
+        const desktopReadBtn = item.querySelector('[data-desktop]');
+        if (desktopReadBtn) {
+            desktopReadBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                readOnDesktop(book);
+            });
+        }
+        const deleteBtn = item.querySelector('[data-delete]');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                if (!confirm(`删除《${book.title}》？导入的进度会一并清除。`)) return;
+                try {
+                    await API.deleteNovel(book.book_id);
+                    state.books = state.books.filter(b => b.book_id !== book.book_id);
+                    state.progressByBook.delete(book.book_id);
+                    renderLibrary();
+                } catch (error) {
+                    alert(error.message || '删除失败');
+                }
+            });
+        }
         document.getElementById('book-list').appendChild(item);
     }
 
@@ -190,6 +229,8 @@
             populateChapterSelect();
             document.getElementById('leisure-library').hidden = true;
             document.getElementById('novel-reader').hidden = false;
+            const desktopBtn = document.getElementById('desktop-read-btn');
+            if (desktopBtn) desktopBtn.hidden = !canDesktopRead();
             await renderChapter();
         } catch (error) {
             status.textContent = error.message;
@@ -252,7 +293,43 @@
         document.getElementById('start-learning').addEventListener('click', () => {
             window.location.href = `learn.html?pet_id=${encodeURIComponent(state.petId)}`;
         });
+        const feedSelect = document.getElementById('feed-channel-select');
+        if (feedSelect) {
+            feedSelect.hidden = !canDesktopFeed();
+            feedSelect.addEventListener('change', () => {
+                const channel = feedSelect.value;
+                if (channel && typeof window.desktopAPI.openFeedChannel === 'function') {
+                    window.desktopAPI.openFeedChannel(channel).catch(() => {});
+                }
+                feedSelect.value = '';
+            });
+        }
+        const importBtn = document.getElementById('import-novel-btn');
+        const fileInput = document.getElementById('novel-file-input');
+        if (importBtn && fileInput) {
+            importBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', async () => {
+                const file = fileInput.files && fileInput.files[0];
+                fileInput.value = '';
+                if (!file) return;
+                const status = document.getElementById('leisure-status');
+                status.textContent = '正在导入…';
+                try {
+                    const result = await API.importNovel(file);
+                    status.textContent = `已导入《${result.book.title}》(${result.book.chapter_count} 章)`;
+                } catch (error) {
+                    status.textContent = error.message || '导入失败';
+                }
+                await loadLibrary();
+            });
+        }
         document.getElementById('close-reader').addEventListener('click', closeReader);
+        const desktopReadBtn = document.getElementById('desktop-read-btn');
+        if (desktopReadBtn) {
+            desktopReadBtn.addEventListener('click', () => {
+                if (state.book) readOnDesktop(state.book);
+            });
+        }
         document.getElementById('previous-chapter').addEventListener('click', async () => {
             if (state.chapterIndex > 0) { state.chapterIndex -= 1; await renderChapter(); }
         });

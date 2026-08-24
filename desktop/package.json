@@ -28,6 +28,7 @@
       "preload.js",
       "preload_web.js",
       "preload_setup.js",
+      "feed_preload.js",
       "renderer/**/*",
       "package.json"
     ],

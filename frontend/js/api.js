@@ -1,4 +1,6 @@
-const API_BASE = '/api';
+// 桌面端本地打包面板会由 preload 注入 __QAGENT_RUNTIME__.apiBase(绝对后端地址)；
+// 浏览器兜底时为空串,退回同源相对路径
+const API_BASE = (window.__QAGENT_RUNTIME__ && window.__QAGENT_RUNTIME__.apiBase ? window.__QAGENT_RUNTIME__.apiBase : '') + '/api';
 
 /**
  * 获取当前用户 ID，自动从 localStorage 读取
@@ -214,6 +216,32 @@ const API = {
             body: JSON.stringify(progress)
         });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '保存阅读进度失败');
+        return await response.json();
+    },
+
+    async importNovel(file) {
+        const form = new FormData();
+        form.append('file', file);
+        const response = await fetch(`${API_BASE}/leisure/novels/import`, {
+            method: 'POST',
+            headers: buildHeaders(), // 不手动设 Content-Type,让浏览器生成 multipart boundary
+            body: form
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '导入小说失败');
+        return await response.json();
+    },
+
+    async listMyNovels() {
+        const response = await fetch(`${API_BASE}/leisure/novels/mine`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('获取我的导入小说失败');
+        return await response.json();
+    },
+
+    async deleteNovel(bookId) {
+        const response = await fetch(`${API_BASE}/leisure/novels/${encodeURIComponent(bookId)}`, {
+            method: 'DELETE', headers: buildHeaders()
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '删除小说失败');
         return await response.json();
     },
 

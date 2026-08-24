@@ -62,5 +62,6 @@ Thumbs.db
 .qoder/
 .claude/worktrees/
 .workbuddy/
+.zcode/
 AGENTS.md
 CLAUDE.md

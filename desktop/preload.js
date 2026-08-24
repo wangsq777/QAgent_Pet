@@ -25,6 +25,21 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   proactiveOpened: (eventId, claimToken) => ipcRenderer.invoke('api:proactive-opened', eventId, claimToken),
   proactiveAction: (eventId, action, claimToken) => ipcRenderer.invoke('api:proactive-action', eventId, action, claimToken),
 
+  // 摸鱼·小说阅读
+  openNovel: () => ipcRenderer.invoke('app:open-novel'),
+  openNovelBook: (bookId) => ipcRenderer.invoke('app:open-novel-book', bookId),
+  hideNovel: () => ipcRenderer.invoke('app:hide-novel'),
+  importNovel: () => ipcRenderer.invoke('app:novel-import'),
+  listNovels: () => ipcRenderer.invoke('api:novel-list'),
+  listMyNovels: () => ipcRenderer.invoke('api:novel-mine'),
+  listNovelChapters: (bookId) => ipcRenderer.invoke('api:novel-chapters', bookId),
+  getNovelChapter: (bookId, chapterId) => ipcRenderer.invoke('api:novel-chapter', bookId, chapterId),
+  getNovelProgress: (bookId) => ipcRenderer.invoke('api:novel-progress-get', bookId),
+  saveNovelProgress: (bookId, body) => ipcRenderer.invoke('api:novel-progress-save', bookId, body),
+  openNovelSession: (bookId) => ipcRenderer.invoke('api:novel-session-open', bookId),
+  closeNovelSession: (sessionId) => ipcRenderer.invoke('api:novel-session-close', sessionId),
+  deleteNovel: (bookId) => ipcRenderer.invoke('api:novel-delete', bookId),
+
   onConfigUpdated: (callback) => {
     ipcRenderer.on('config-updated', (_event, config) => callback(config));
   },
@@ -36,5 +51,8 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   },
   onProactiveEvent: (callback) => {
     ipcRenderer.on('proactive-event', (_event, proactiveEvent) => callback(proactiveEvent));
+  },
+  onOpenNovelBook: (callback) => {
+    ipcRenderer.on('novel-open-book', (_event, bookId) => callback(bookId));
   }
 });

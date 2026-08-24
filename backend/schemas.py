@@ -208,6 +208,17 @@ class LeisureSettingsRequest(BaseModel):
     privacy_level: Literal["private", "generic"] = "private"
 
 
+class NovelImportResponse(BaseModel):
+    book_id: str
+    title: str
+    author: str
+    chapter_count: int
+    source_format: str
+    source_filename: str = ""
+    owner_user_id: str
+    content_source: str = "user"
+
+
 # ============ 自定义宠物相关 Schema ============
 
 class CustomPetConfigRequest(BaseModel):
