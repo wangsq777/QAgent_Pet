@@ -13,15 +13,18 @@
 所有接口校验学习会话归属当前 request.state.user_id，自定义宠物校验所有权。
 """
 
+import json
 import re
 import uuid
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from backend.database import get_db
 from backend.services.learning_service import learning_service, LearningError
+from backend.services.proactive_service import create_learning_celebrate_event
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -33,6 +36,9 @@ UUID_PATTERN = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
     re.IGNORECASE
 )
+
+# 自定义宠物 ID 格式：custom_ + 8 位十六进制（见 custom_pets.py 创建逻辑）
+CUSTOM_PET_ID_PATTERN = re.compile(r'^custom_[0-9a-f]{8}$')
 
 PRESET_PET_IDS = {"hot_dog", "cold_cat", "mouse"}
 
@@ -49,12 +55,13 @@ def _learning_error_to_http(e: LearningError) -> HTTPException:
 async def _verify_pet_access(user_id: str, pet_id: str) -> str:
     """
     校验当前用户可使用该宠物，返回 pet_source('preset'/'custom')。
-    预置宠物公开可用；自定义宠物需归属当前用户。
+    预置宠物公开可用；自定义宠物需格式合法且归属当前用户。
     """
     if pet_id in PRESET_PET_IDS:
         return "preset"
-    # 自定义宠物：校验归属
-    _validate_uuid(pet_id, "pet_id")
+    # 自定义宠物：校验 ID 格式（非 UUID，是 custom_xxxxxxxx）后校验归属
+    if not CUSTOM_PET_ID_PATTERN.match(pet_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid pet_id format")
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT pet_id FROM custom_pets WHERE pet_id = ? AND user_id = ?",
@@ -145,6 +152,15 @@ async def create_session(body: CreateSessionRequest, request: Request):
     return result
 
 
+@router.get("/sessions")
+@limiter.limit("60/minute")
+async def list_sessions(request: Request):
+    """列出当前用户的学习会话（历史记录入口），进行中/暂停优先。"""
+    user_id = request.state.user_id
+    sessions = await learning_service.list_sessions(user_id)
+    return {"sessions": sessions}
+
+
 @router.get("/sessions/{session_id}")
 @limiter.limit("60/minute")
 async def get_session_detail(session_id: str, request: Request):
@@ -186,6 +202,30 @@ async def teach_chapter(session_id: str, chapter_id: int, request: Request):
     return result
 
 
+@router.post("/sessions/{session_id}/chapters/{chapter_id}/teach-stream")
+@limiter.limit("10/minute")
+async def teach_chapter_stream(session_id: str, chapter_id: int, request: Request):
+    """流式生成章节讲解（SSE）：teacher_delta -> teacher_done -> pet_comment -> done。
+
+    鉴权/归属校验在创建响应前完成（此时错误仍返回标准 HTTP 状态码）；
+    流开始后的业务错误以 error 事件发送。"""
+    user_id = request.state.user_id
+    _validate_uuid(session_id, "session_id")
+    if chapter_id < 1 or chapter_id > 99:
+        raise HTTPException(status_code=400, detail="Invalid chapter_id")
+
+    await _get_session_and_check_owner(session_id, user_id)
+
+    return StreamingResponse(
+        learning_service.teach_chapter_stream(session_id, chapter_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/sessions/{session_id}/ask")
 @limiter.limit("20/minute")
 async def ask(session_id: str, body: AskRequest, request: Request):
@@ -217,7 +257,7 @@ async def complete_chapter(session_id: str, chapter_id: int, request: Request):
     _validate_uuid(session_id, "session_id")
     if chapter_id < 1 or chapter_id > 99:
         raise HTTPException(status_code=400, detail="Invalid chapter_id")
-    await _get_session_and_check_owner(session_id, user_id)
+    row = await _get_session_and_check_owner(session_id, user_id)
 
     try:
         result = await learning_service.complete_chapter(session_id, chapter_id)
@@ -226,6 +266,25 @@ async def complete_chapter(session_id: str, chapter_id: int, request: Request):
     except Exception as e:
         logger.exception("complete_chapter failed: %s", e)
         raise HTTPException(status_code=500, detail="完成章节失败，请稍后重试")
+
+    # 首次完成本章时创建宠物庆祝事件（LLM 文案 + 模板兜底）；
+    # 任何异常只记日志，绝不影响 complete_chapter 主流程的结果。
+    if result.get("intimacy_change", 0) > 0:
+        try:
+            chapter_title = ""
+            for chapter in json.loads(row.get("outline_json") or "[]"):
+                if chapter.get("chapter_id") == chapter_id:
+                    chapter_title = str(chapter.get("title") or "")[:100]
+                    break
+            async with get_db() as db:
+                await create_learning_celebrate_event(
+                    db, user_id=user_id, learning_session_id=session_id,
+                    pet_id=row["pet_id"], pet_source=row["pet_source"],
+                    chapter_id=chapter_id, chapter_title=chapter_title,
+                )
+        except Exception as e:
+            logger.warning("create learning_celebrate event failed (ignored): %s", e)
+
     return result
 
 

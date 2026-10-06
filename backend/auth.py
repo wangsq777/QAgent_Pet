@@ -24,6 +24,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """API Key 认证中间件"""
 
     async def dispatch(self, request: Request, call_next):
+        # Host 白名单：防 DNS rebinding（攻击者域名解析到 127.0.0.1 时 Host 不在白名单内）
+        host_header = (request.headers.get("host") or "").strip().lower()
+        if host_header.startswith("[") and "]" in host_header:  # IPv6 字面量 [::1]:port
+            host = host_header[1:host_header.index("]")]
+        else:
+            host = host_header.split(":")[0]
+        allowed_hosts = {h.strip().lower() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()}
+        if allowed_hosts and host not in allowed_hosts:
+            return JSONResponse(status_code=403, content={"detail": "Forbidden host"})
+
         # 排除健康检查和文档路径
         path = request.url.path
         if path in EXCLUDED_PATHS or path.startswith("/frontend"):

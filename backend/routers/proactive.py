@@ -23,6 +23,7 @@ def _public(event: dict) -> dict:
     full = event.get("rendered_message") or context.get("full_message") or f"{context.get('subject') or context.get('content') or '我来看看你。'}"
     return {"event_id": event["event_id"], "claim_token": event.get("claim_token"), "source_type": event["source_type"],
             "bubble_text": event["bubble_text"], "full_message": full,
+            "message_context": context,
             "suggested_actions": ["acknowledge", "snooze_10m", "snooze_1h", "complete", "dismiss"],
             "scheduled_at_utc": event.get("scheduled_at_utc"), "status": event.get("status")}
 
@@ -37,7 +38,8 @@ async def claim(body: ProactiveClaimRequest, request: Request):
         if not session or session[0] != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
         await ensure_settings(db, request.state.user_id, body.timezone)
-        event = await claim_event(db, user_id=request.state.user_id, session_id=body.session_id, timezone=body.timezone, client_id=body.client_id)
+        event = await claim_event(db, user_id=request.state.user_id, session_id=body.session_id, timezone=body.timezone, client_id=body.client_id,
+                                  idle_state=body.idle_state.model_dump() if body.idle_state else None)
         return {"event": _public(event) if event else None}
 
 
@@ -130,7 +132,7 @@ async def update_settings(body: ProactiveSettingsRequest, request: Request):
         await ensure_settings(db, request.state.user_id, body.timezone)
         values = body.model_dump()
         values.update({"user_id": request.state.user_id, "updated_at_utc": now})
-        await db.execute("""UPDATE proactive_settings SET enabled=?,timezone=?,timezone_policy=?,quiet_start=?,quiet_end=?,max_general_per_day=?,min_interval_minutes=?,schedule_enabled=?,concern_enabled=?,emotion_followup_enabled=?,inactivity_enabled=?,pet_initiated_enabled=?,privacy_level=?,updated_at_utc=? WHERE user_id=?""",
-                         (int(values["enabled"]), values["timezone"], values["timezone_policy"], values["quiet_start"], values["quiet_end"], values["max_general_per_day"], values["min_interval_minutes"], int(values["schedule_enabled"]), int(values["concern_enabled"]), int(values["emotion_followup_enabled"]), int(values["inactivity_enabled"]), int(values["pet_initiated_enabled"]), values["privacy_level"], now, request.state.user_id))
+        await db.execute("""UPDATE proactive_settings SET enabled=?,timezone=?,timezone_policy=?,quiet_start=?,quiet_end=?,max_general_per_day=?,min_interval_minutes=?,schedule_enabled=?,concern_enabled=?,emotion_followup_enabled=?,inactivity_enabled=?,pet_initiated_enabled=?,sedentary_enabled=?,hydration_enabled=?,sleep_enabled=?,learning_enabled=?,weather_enabled=?,privacy_level=?,updated_at_utc=? WHERE user_id=?""",
+                         (int(values["enabled"]), values["timezone"], values["timezone_policy"], values["quiet_start"], values["quiet_end"], values["max_general_per_day"], values["min_interval_minutes"], int(values["schedule_enabled"]), int(values["concern_enabled"]), int(values["emotion_followup_enabled"]), int(values["inactivity_enabled"]), int(values["pet_initiated_enabled"]), int(values["sedentary_enabled"]), int(values["hydration_enabled"]), int(values["sleep_enabled"]), int(values["learning_enabled"]), int(values["weather_enabled"]), values["privacy_level"], now, request.state.user_id))
         await db.commit()
         return await ensure_settings(db, request.state.user_id, body.timezone)

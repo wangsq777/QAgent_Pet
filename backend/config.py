@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.minimaxi.com/anthropic"
     LLM_MODEL: str = "MiniMax-M2.5"
+    # API 协议: "anthropic"（/v1/messages）| "openai"（/chat/completions）
+    # "auto" 时按 base_url 自动判断（含 "anthropic" 走 anthropic，否则走 openai）
+    LLM_API_PROTOCOL: str = "auto"
+    # LLM 调用重试：仅对 429/5xx 与网络错误重试，指数退避 base_delay * 2**attempt
+    LLM_RETRY_ATTEMPTS: int = 2
+    LLM_RETRY_BASE_DELAY: float = 1.0
     WEATHER_API_KEY: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./qagent_pet.db"
     PORT: int = 10000
@@ -22,7 +28,13 @@ class Settings(BaseSettings):
 
     # CORS 配置
     # 本地开发默认值，生产环境应限制为实际前端域名，如 "https://your-frontend.example.com"
-    CORS_ORIGINS: str = "http://localhost:10000,http://127.0.0.1:10000"
+    # "null" 对应桌面端 file:// 面板直连本机 API 时的 Origin
+    CORS_ORIGINS: str = "http://localhost:10000,http://127.0.0.1:10000,null"
+
+    # 允许的 Host 头（防 DNS rebinding：浏览器把攻击者域名解析到 127.0.0.1 时，
+    # Host 不是回环地址，直接拒绝）。桌面本地部署保持默认即可；
+    # 若部署到公网/反向代理后，把实际域名加进来，如 "api.example.com"
+    ALLOWED_HOSTS: str = "127.0.0.1,localhost,::1"
 
     # Embedding API 配置（默认复用 LLM 的 base_url 和 key）
     EMBEDDING_API_URL: str = ""

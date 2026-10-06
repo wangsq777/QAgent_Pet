@@ -6,7 +6,7 @@
     <title>桌宠设置 - QAgent Pet</title>
     <link rel="stylesheet" href="css/shell.css?v=3">
     <link rel="stylesheet" href="css/styles.css?v=6">
-    <link rel="stylesheet" href="css/settings.css?v=2">
+    <link rel="stylesheet" href="css/settings.css?v=3">
 </head>
 <body>
     <main class="settings-page">
@@ -37,8 +37,8 @@
 
             <article class="setting-card">
                 <h2>开机自启</h2>
-                <p>桌宠增强阶段会提供开机自启与上次位置恢复。</p>
-                <span class="setting-badge">Phase 3</span>
+                <p>登录系统后桌宠自动在托盘驻留，气泡提醒与聊天窗口照常可用。</p>
+                <button id="autostart-setting-btn" class="setting-toggle">开机自启：关</button>
             </article>
 
             <article class="setting-card">
@@ -60,6 +60,35 @@
                 <p>管理日程提醒、惦记回访和桌面气泡。日程提醒仍会在统一规则下克制触达。</p>
                 <button id="proactive-setting-btn" class="setting-toggle">加载中…</button>
                 <small id="proactive-setting-status"></small>
+                <div id="proactive-options" class="proactive-options">
+                    <div class="proactive-option-row">
+                        <span>久坐提醒</span>
+                        <button type="button" class="setting-toggle" data-proactive-key="sedentary_enabled">久坐提醒：开</button>
+                    </div>
+                    <div class="proactive-option-row">
+                        <span>喝水提醒</span>
+                        <button type="button" class="setting-toggle" data-proactive-key="hydration_enabled">喝水提醒：开</button>
+                    </div>
+                    <div class="proactive-option-row">
+                        <span>睡觉提醒</span>
+                        <button type="button" class="setting-toggle" data-proactive-key="sleep_enabled">睡觉提醒：开</button>
+                    </div>
+                    <div class="proactive-option-row">
+                        <span>学习提醒（含学习庆祝）</span>
+                        <button type="button" class="setting-toggle" data-proactive-key="learning_enabled">学习提醒：开</button>
+                    </div>
+                    <div class="proactive-option-row">
+                        <span>天气推送</span>
+                        <button type="button" class="setting-toggle" data-proactive-key="weather_enabled">天气推送：开</button>
+                    </div>
+                    <div class="proactive-option-row">
+                        <span>气泡隐私</span>
+                        <select id="proactive-privacy-select" class="setting-select">
+                            <option value="generic">只显示泛化气泡</option>
+                            <option value="topic">允许显示主题气泡</option>
+                        </select>
+                    </div>
+                </div>
             </article>
         </section>
     </main>
@@ -114,8 +143,38 @@
 
         sync();
 
+        const autostartButton = document.getElementById('autostart-setting-btn');
+        const syncAutostart = async () => {
+            if (!window.desktopAPI?.getAutostart) {
+                autostartButton.textContent = '浏览器模式不可用';
+                autostartButton.disabled = true;
+                return;
+            }
+            const enabled = await window.desktopAPI.getAutostart();
+            autostartButton.textContent = enabled ? '开机自启：开' : '开机自启：关';
+            autostartButton.classList.toggle('enabled', Boolean(enabled));
+        };
+        autostartButton.addEventListener('click', async () => {
+            if (!window.desktopAPI?.getAutostart) return;
+            autostartButton.disabled = true;
+            const enabled = await window.desktopAPI.getAutostart();
+            await window.desktopAPI.setAutostart(!enabled);
+            autostartButton.disabled = false;
+            await syncAutostart();
+        });
+        syncAutostart().catch(() => { autostartButton.textContent = '开机自启：关'; });
+
         const proactiveButton = document.getElementById('proactive-setting-btn');
         const proactiveStatus = document.getElementById('proactive-setting-status');
+        const proactiveOptionButtons = Array.from(document.querySelectorAll('[data-proactive-key]'));
+        const proactivePrivacySelect = document.getElementById('proactive-privacy-select');
+        const PROACTIVE_OPTION_LABELS = {
+            sedentary_enabled: '久坐提醒',
+            hydration_enabled: '喝水提醒',
+            sleep_enabled: '睡觉提醒',
+            learning_enabled: '学习提醒',
+            weather_enabled: '天气推送'
+        };
         let proactiveSettings = null;
         const syncProactive = async () => {
             try {
@@ -123,13 +182,42 @@
                 proactiveButton.textContent = proactiveSettings.enabled ? '主动陪伴：开' : '主动陪伴：关';
                 proactiveButton.classList.toggle('enabled', Boolean(proactiveSettings.enabled));
                 proactiveStatus.textContent = `勿扰 ${proactiveSettings.quiet_start}-${proactiveSettings.quiet_end} · 每日普通互动 ${proactiveSettings.max_general_per_day} 次`;
-            } catch (error) { proactiveButton.textContent = '浏览器模式不可用'; proactiveStatus.textContent = error.message; }
+                proactiveOptionButtons.forEach((button) => {
+                    const key = button.dataset.proactiveKey;
+                    const enabled = Boolean(proactiveSettings[key]);
+                    button.textContent = `${PROACTIVE_OPTION_LABELS[key]}：${enabled ? '开' : '关'}`;
+                    button.classList.toggle('enabled', enabled);
+                });
+                proactivePrivacySelect.value = proactiveSettings.privacy_level === 'topic' ? 'topic' : 'generic';
+            } catch (error) {
+                proactiveButton.textContent = '浏览器模式不可用';
+                proactiveStatus.textContent = error.message;
+                proactiveOptionButtons.forEach((button) => { button.disabled = true; });
+                proactivePrivacySelect.disabled = true;
+            }
         };
         proactiveButton.addEventListener('click', async () => {
             if (!proactiveSettings) return;
             proactiveButton.disabled = true;
             await API.updateProactiveSettings({ ...proactiveSettings, enabled: !proactiveSettings.enabled });
             proactiveButton.disabled = false;
+            await syncProactive();
+        });
+        proactiveOptionButtons.forEach((button) => {
+            button.addEventListener('click', async () => {
+                if (!proactiveSettings) return;
+                const key = button.dataset.proactiveKey;
+                button.disabled = true;
+                await API.updateProactiveSettings({ ...proactiveSettings, [key]: !proactiveSettings[key] });
+                button.disabled = false;
+                await syncProactive();
+            });
+        });
+        proactivePrivacySelect.addEventListener('change', async () => {
+            if (!proactiveSettings) return;
+            proactivePrivacySelect.disabled = true;
+            await API.updateProactiveSettings({ ...proactiveSettings, privacy_level: proactivePrivacySelect.value });
+            proactivePrivacySelect.disabled = false;
             await syncProactive();
         });
         syncProactive();

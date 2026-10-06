@@ -29,8 +29,15 @@ FIELD_MAX_LEN = {
 # 字段名格式校验（第二道防线）
 FIELD_NAME_PATTERN = re.compile(r'^[a-z_]+$')
 
+# 主 Agent 允许同步写入的画像字段（信任闸门：仅低风险、用户明示类字段）。
+# 其余字段仍由后台画像 Agent 提取，防止用户消息借主 Agent 直接篡改画像。
+MAIN_AGENT_PROFILE_FIELDS = {"region"}
+
 
 class MemoryService:
+    def __init__(self):
+        # 画像内存缓存（写穿）：get_user_profile 每轮被调多次，写库后立即刷新
+        self._profile_cache: Dict[str, Dict] = {}
     async def get_short_term_messages(self, session_id: str, limit: int = 10) -> List[MessageResponse]:
         async with get_db() as db:
             cursor = await db.execute(
@@ -245,15 +252,65 @@ class MemoryService:
                     )
                 )
             await db.commit()
+        await self._refresh_profile_cache(user_id)
+
+    async def apply_main_agent_profile_update(self, user_id: str, update: Dict[str, Any]) -> bool:
+        """
+        信任闸门：应用主 Agent 在回复中声明的画像更新。
+        仅放行 MAIN_AGENT_PROFILE_FIELDS 白名单字段，值经统一消毒截断，
+        落库后同步刷新缓存并记录 profile_updated 事件。返回是否实际写入。
+        """
+        if not isinstance(update, dict):
+            return False
+        filtered = {}
+        for field_name, value in update.items():
+            if field_name not in MAIN_AGENT_PROFILE_FIELDS:
+                if field_name in ALLOWED_PROFILE_FIELDS:
+                    logger.info("主 Agent 画像字段 %s 不在同步写白名单，已忽略", field_name)
+                else:
+                    logger.warning("主 Agent 尝试写入非法画像字段: %s", field_name)
+                continue
+            sanitized = self._sanitize_profile_value(field_name, value)
+            if sanitized is not None:
+                filtered[field_name] = sanitized
+        if not filtered:
+            return False
+
+        await self.merge_user_profile(user_id, filtered)
+
+        from backend.services.event_service import event_service
+        await event_service.append_event(
+            user_id, None, "profile_updated",
+            {"fields": filtered, "source": "main_agent"}
+        )
+        return True
 
     async def get_user_profile(self, user_id: str) -> Optional[Dict]:
+        if user_id in self._profile_cache:
+            return dict(self._profile_cache[user_id])
         async with get_db() as db:
             cursor = await db.execute(
                 "SELECT * FROM user_profiles WHERE user_id = ?",
                 (user_id,)
             )
             row = await cursor.fetchone()
-            return dict(row) if row else None
+        profile = dict(row) if row else None
+        if profile is not None:
+            self._profile_cache[user_id] = profile
+        return profile
+
+    async def _refresh_profile_cache(self, user_id: str) -> None:
+        """写库后刷新缓存（写穿），保证下一轮对话立即读到最新画像"""
+        async with get_db() as db:
+            cursor = await db.execute(
+                "SELECT * FROM user_profiles WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+        if row:
+            self._profile_cache[user_id] = dict(row)
+        else:
+            self._profile_cache.pop(user_id, None)
 
     def _sanitize_profile_value(self, field_name: str, value: Any) -> Optional[str]:
         """对用户画像字段值做长度截断与空值过滤"""
@@ -336,6 +393,7 @@ class MemoryService:
                 logger.debug("用户画像已创建: %s", profile_data)
 
             await db.commit()
+        await self._refresh_profile_cache(user_id)
 
     async def save_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> None:
         """
@@ -392,7 +450,8 @@ class MemoryService:
                     )
                 )
             await db.commit()
-            logger.debug("用户画像已保存: %s", profile_data)
+        await self._refresh_profile_cache(user_id)
+        logger.debug("用户画像已保存: %s", profile_data)
 
 
 memory_service = MemoryService()

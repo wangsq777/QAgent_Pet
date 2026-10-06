@@ -141,6 +141,60 @@ class WeatherService:
             logger.error("未知错误: %s", e)
             return None
 
+    async def get_daily_forecast(self, city: str) -> Optional[Dict[str, Any]]:
+        """查询城市今明两天的逐日预报（穿衣建议/早晨提醒用）。
+
+        Returns:
+            {"city": 规范城市名, "country": ..., "today": {...}, "tomorrow": {...}}，
+            其中每天含 date/temp_max/temp_min/precip_probability/precip_sum/weathercode/text。
+            地理编码失败或数据不足返回 None。
+        """
+        coords = await self._get_coordinates(city)
+        if not coords:
+            return None
+        params = {
+            "latitude": coords["latitude"],
+            "longitude": coords["longitude"],
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,weathercode",
+            "timezone": coords["timezone"],
+            "forecast_days": 2,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(self.weather_url, params=params)
+                response.raise_for_status()
+                data = response.json()
+        except Exception as e:
+            logger.warning("获取逐日预报失败(%s): %s", city, e)
+            return None
+
+        daily = data.get("daily") or {}
+        times = daily.get("time") or []
+        if len(times) < 2:
+            logger.warning("逐日预报数据不足(%s): %s", city, str(daily)[:200])
+            return None
+        prob_list = daily.get("precipitation_probability_max") or [0] * len(times)
+
+        def _day(idx: int) -> Dict[str, Any]:
+            code = (daily.get("weathercode") or [0] * len(times))[idx]
+            return {
+                "date": times[idx],
+                "temp_max": (daily.get("temperature_2m_max") or [None] * len(times))[idx],
+                "temp_min": (daily.get("temperature_2m_min") or [None] * len(times))[idx],
+                "precip_probability": prob_list[idx] or 0,
+                "precip_sum": (daily.get("precipitation_sum") or [0] * len(times))[idx] or 0,
+                "weathercode": code,
+                "text": WEATHER_CODE_MAP.get(code, "未知"),
+            }
+
+        return {
+            "city": coords["name"],
+            "country": coords.get("country", ""),
+            "timezone": coords["timezone"],
+            "today": _day(0),
+            "tomorrow": _day(1),
+        }
+
     def _get_wind_direction(self, degrees: int) -> str:
         """将角度转换为风向描述"""
         directions = [
@@ -198,3 +252,58 @@ class WeatherService:
 
 # 全局单例
 weather_service = WeatherService()
+
+
+def evaluate_weather_significance(today: Optional[Dict[str, Any]], tomorrow: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    """判断次日天气是否「显著」到值得主动提醒。
+
+    规则（满足任一即显著）：
+    - 降水概率 >= 40%                          -> "rain"（气泡提示带伞）
+    - 24h 降温：今日最高温 - 明日最高温 >= 5°C  -> "cooling"
+    - 明日最高温 >= 33°C                       -> "hot"
+    - 明日最低温 <= 0°C                        -> "cold"
+
+    返回 (是否显著, 原因键)；不显著时原因键为 None。
+    """
+    precip_prob = tomorrow.get("precip_probability") or 0
+    if precip_prob >= 40:
+        return True, "rain"
+    tmax = tomorrow.get("temp_max")
+    if tmax is not None:
+        today_max = (today or {}).get("temp_max")
+        if today_max is not None and today_max - tmax >= 5:
+            return True, "cooling"
+        if tmax >= 33:
+            return True, "hot"
+    tmin = tomorrow.get("temp_min")
+    if tmin is not None and tmin <= 0:
+        return True, "cold"
+    return False, None
+
+
+def build_outfit_advice(tomorrow: Dict[str, Any]) -> str:
+    """无 LLM 可用时的模板穿衣建议：按最高温五档 + 降水附加提示。"""
+    tmax = tomorrow.get("temp_max")
+    tmin = tomorrow.get("temp_min")
+    prob = tomorrow.get("precip_probability") or 0
+    precip_sum = tomorrow.get("precip_sum") or 0
+    text = tomorrow.get("text") or "未知"
+
+    if tmax is None:
+        base = "明天的天气有点多变，洋葱式穿衣最稳妥，方便随时增减～"
+    elif tmax >= 33:
+        base = f"明天最高{tmax:g}°C，热浪来袭：短袖短裤安排上，记得防晒多补水～"
+    elif tmax >= 25:
+        base = f"明天最高{tmax:g}°C，轻薄透气的夏装最合适，长时间在空调房可以备件薄外套～"
+    elif tmax >= 15:
+        lo = f"，最低{tmin:g}°C" if tmin is not None else ""
+        base = f"明天{tmax:g}°C{lo}，长袖加一件薄外套，冷热切换都不怕～"
+    elif tmax >= 5:
+        lo = f"，最低{tmin:g}°C" if tmin is not None else ""
+        base = f"明天{tmax:g}°C{lo}，凉意明显：毛衣或厚夹克穿起来，早晚注意保暖～"
+    else:
+        base = f"明天最高才{tmax:g}°C，冻手冻脚：羽绒服/厚棉衣全副武装，围巾也别落下～"
+
+    if prob >= 40 or precip_sum >= 1:
+        base += f" 另外明天有雨（降水概率{prob:g}%），出门记得带伞☔"
+    return base

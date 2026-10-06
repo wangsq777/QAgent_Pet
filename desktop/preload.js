@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   proactiveDelivered: (eventId, claimToken) => ipcRenderer.invoke('api:proactive-delivered', eventId, claimToken),
   proactiveOpened: (eventId, claimToken) => ipcRenderer.invoke('api:proactive-opened', eventId, claimToken),
   proactiveAction: (eventId, action, claimToken) => ipcRenderer.invoke('api:proactive-action', eventId, action, claimToken),
+  outfitAdvice: (city) => ipcRenderer.invoke('api:outfit-advice', city || ''),
 
   // 摸鱼·小说阅读
   openNovel: () => ipcRenderer.invoke('app:open-novel'),

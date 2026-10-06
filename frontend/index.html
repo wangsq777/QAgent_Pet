@@ -83,7 +83,7 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <script src="js/api.js?v=3"></script>
+    <script src="js/api.js?v=4"></script>
     <script src="js/shell.js?v=4"></script>
     <script>
         initAppShell('index');
@@ -147,38 +147,68 @@
                         const typeName = petTypeNames[pet.pet_type] || pet.pet_type;
                         const personalityStr = pet.personality_tags ? pet.personality_tags.slice(0, 2).join('、') : '';
                         const presetImg = petTypePresetImages[pet.pet_type] || '';
-                        const safePetId = JSON.stringify(pet.pet_id);
-                        const safePetName = JSON.stringify(pet.pet_name);
-                        const safeAvatarUrl = JSON.stringify(pet.avatar_url || '');
-                        let avatarHtml;
-
-                        if (pet.avatar_url) {
-                            avatarHtml = `<img src="${pet.avatar_url}" alt="${pet.pet_name}" class="pet-emoji">`;
-                        } else if (presetImg) {
-                            avatarHtml = `<img src="${presetImg}" alt="${pet.pet_name}" class="pet-emoji">`;
-                        } else {
-                            avatarHtml = `<span class="pet-emoji-icon" style="font-size:64px;">${emoji}</span>`;
-                        }
+                        const petName = String(pet.pet_name || '');
+                        const avatarUrl = String(pet.avatar_url || '');
 
                         const petCard = document.createElement('div');
                         petCard.className = 'pet-card custom-pet-user';
                         petCard.dataset.petId = pet.pet_id;
-                        petCard.innerHTML = `
-                            <div class="pet-emoji-wrap">
-                                ${avatarHtml}
-                            </div>
-                            <h2 class="pet-name">${pet.pet_name}</h2>
-                            <span class="pet-tag">${typeName}</span>
-                            <p class="pet-desc">${personalityStr ? `性格关键词：${personalityStr}` : '一只由你定义出来的专属宠物，适合长期养成和个性化陪伴。'}</p>
-                            <div class="card-footnote">
-                                <span>我的自定义角色</span>
-                                <span>${personalityStr || '自由设定'}</span>
-                            </div>
-                            <div class="btn-group">
-                                <button class="select-btn" onclick='selectCustomPet(${safePetId}, ${safePetName}, ${safeAvatarUrl}, ${JSON.stringify(pet.pet_type)})'>进入 ${pet.pet_name} 的会话</button>
-                                <button class="delete-pet-btn" onclick='deletePet(event, ${safePetId}, ${safePetName})'>删除这个宠物</button>
-                            </div>
-                        `;
+
+                        const emojiWrap = document.createElement('div');
+                        emojiWrap.className = 'pet-emoji-wrap';
+                        if (avatarUrl || presetImg) {
+                            const img = document.createElement('img');
+                            img.src = avatarUrl || presetImg;
+                            img.alt = petName;
+                            img.className = 'pet-emoji';
+                            emojiWrap.appendChild(img);
+                        } else {
+                            const span = document.createElement('span');
+                            span.className = 'pet-emoji-icon';
+                            span.style.fontSize = '64px';
+                            span.textContent = emoji;
+                            emojiWrap.appendChild(span);
+                        }
+                        petCard.appendChild(emojiWrap);
+
+                        const nameEl = document.createElement('h2');
+                        nameEl.className = 'pet-name';
+                        nameEl.textContent = petName;
+                        petCard.appendChild(nameEl);
+
+                        const tagEl = document.createElement('span');
+                        tagEl.className = 'pet-tag';
+                        tagEl.textContent = typeName;
+                        petCard.appendChild(tagEl);
+
+                        const descEl = document.createElement('p');
+                        descEl.className = 'pet-desc';
+                        descEl.textContent = personalityStr
+                            ? `性格关键词：${personalityStr}`
+                            : '一只由你定义出来的专属宠物，适合长期养成和个性化陪伴。';
+                        petCard.appendChild(descEl);
+
+                        const footnote = document.createElement('div');
+                        footnote.className = 'card-footnote';
+                        const footLeft = document.createElement('span');
+                        footLeft.textContent = '我的自定义角色';
+                        const footRight = document.createElement('span');
+                        footRight.textContent = personalityStr || '自由设定';
+                        footnote.append(footLeft, footRight);
+                        petCard.appendChild(footnote);
+
+                        const btnGroup = document.createElement('div');
+                        btnGroup.className = 'btn-group';
+                        const selectBtn = document.createElement('button');
+                        selectBtn.className = 'select-btn';
+                        selectBtn.textContent = `进入 ${petName} 的会话`;
+                        selectBtn.addEventListener('click', () => selectCustomPet(pet.pet_id, petName, avatarUrl, pet.pet_type));
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-pet-btn';
+                        deleteBtn.textContent = '删除这个宠物';
+                        deleteBtn.addEventListener('click', (event) => deletePet(event, pet.pet_id, petName));
+                        btnGroup.append(selectBtn, deleteBtn);
+                        petCard.appendChild(btnGroup);
 
                         petGrid.appendChild(petCard);
                     });
@@ -263,7 +293,7 @@
             try {
                 await API.deleteCustomPet(petId);
 
-                const card = document.querySelector(`.pet-card[data-pet-id="${petId}"]`);
+                const card = [...document.querySelectorAll('.pet-card')].find(c => c.dataset.petId === petId);
                 if (card) card.remove();
 
                 const remaining = document.querySelectorAll('.pet-card.custom-pet-user');
@@ -285,7 +315,7 @@
                 btn.disabled = false;
                 btn.textContent = '删除这个宠物';
                 if (error.message.includes('404') || error.message.includes('不存在')) {
-                    const card = document.querySelector(`.pet-card[data-pet-id="${petId}"]`);
+                    const card = [...document.querySelectorAll('.pet-card')].find(c => c.dataset.petId === petId);
                     if (card) card.remove();
                 } else {
                     alert('删除失败，请重试: ' + error.message);

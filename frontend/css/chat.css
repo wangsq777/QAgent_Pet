@@ -653,6 +653,37 @@ body {
     color: var(--text-muted);
 }
 
+/* ── Proactive 事件操作区（知道了/晚点提醒/…/看看怎么穿）── */
+.proactive-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -2px 0 10px 50px; /* 让出宠物头像列，与消息气泡对齐 */
+}
+
+.proactive-actions button {
+    padding: 5px 12px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line-soft);
+    background: var(--bg-card-alt);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.proactive-actions button:hover {
+    transform: scale(1.04);
+}
+
+.proactive-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
 /* ── Loading ── */
 .loading-indicator {
     display: flex;

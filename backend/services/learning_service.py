@@ -10,10 +10,11 @@
 - 亲密度奖励（每章 +2，完成全部额外 +5，rewarded_chapters_json 防重复）
 """
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, AsyncIterator
 from backend.database import get_db
 from backend.services.llm_service import llm_service, _sanitize_prompt_input
 from backend.services.cross_pet_service import cross_pet_service
@@ -304,6 +305,31 @@ README 摘要：
             "completed_at": row.get("completed_at"),
         }
 
+    async def list_sessions(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """列出用户的学习会话（历史记录）：进行中/暂停优先，其余按创建时间倒序。"""
+        async with get_db() as db:
+            cursor = await db.execute(
+                "SELECT id, pet_id, pet_source, github_url, repo_full_name, outline_json, "
+                "current_chapter, status, created_at, completed_at "
+                "FROM learning_sessions WHERE user_id = ? "
+                "ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, "
+                "created_at DESC LIMIT ?",
+                (user_id, limit)
+            )
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        sessions = []
+        for row in rows:
+            try:
+                outline = json.loads(row.get("outline_json") or "[]")
+            except Exception:
+                outline = []
+            row.pop("outline_json", None)
+            row["session_id"] = row.pop("id")
+            row["total_chapters"] = len(outline)
+            sessions.append(row)
+        return sessions
+
     # ---------- 章节教学 ----------
 
     def _build_teach_prompt(
@@ -358,28 +384,45 @@ README 摘要：
     def _build_pet_comment_prompt(
         self,
         pet_persona: dict,
-        chapter_title: str,
-        teacher_summary: str,
+        chapter: Dict[str, Any],
     ) -> str:
+        """基于章节信息生成宠物旁白 prompt（不依赖老师输出，便于与老师讲解并行）。"""
         pet_name = pet_persona.get("pet_name", "宠物")
         catchphrase = pet_persona.get("catchphrase", "")
-        summary = _sanitize_prompt_input(teacher_summary)[:800]
         system = pet_persona.get("system_prompt", "")
+
+        chapter_title = _sanitize_prompt_input(str(chapter.get("title", "")))[:200]
+        learning_goal = _sanitize_prompt_input(str(chapter.get("learning_goal", "")))[:400]
+        focus_paths = ", ".join(chapter.get("focus_paths") or [])[:400]
 
         catchphrase_line = f"你的口头禅是「{catchphrase}」。" if catchphrase else ""
         return (
             f"{system}\n\n"
-            f"现在你是陪主人一起学开源项目的伙伴。主人刚听完老师讲解的一章内容。\n"
+            f"现在你是陪主人一起学开源项目的伙伴。主人马上要开始学下面这一章，你在旁边陪着。\n"
             f"本章标题：{chapter_title}\n"
-            f"老师讲解摘要：\n{summary}\n\n"
+            f"学习目标：{learning_goal}\n"
+            f"关注文件：{focus_paths or '无指定文件'}\n\n"
             f"你是{pet_name}。{catchphrase_line}\n"
-            f"请用你的性格风格，说一段 30-80 字的章末旁白：可以总结、鼓励、或用你的方式吐槽。\n"
+            f"请用你的性格风格，说一段 30-80 字的章末旁白：可以表达对主人的鼓励、对本章主题的期待，或用你的方式吐槽。\n"
             f"约束：\n"
             f"- 必须符合你的性格和口头禅；\n"
-            f"- 只能作为旁听伙伴总结/鼓励/吐槽；\n"
-            f"- 不要引入老师没讲过的新知识，不要冒充老师长篇讲课；\n"
+            f"- 只能作为旁听伙伴陪伴/鼓励/吐槽；\n"
+            f"- 不要冒充老师长篇讲课；\n"
             f"- 直接输出旁白内容，不要加名字前缀。"
         )
+
+    async def _get_chapter_messages(self, session_id: str, chapter_id: int) -> List[Dict[str, Any]]:
+        async with get_db() as db:
+            cursor = await db.execute(
+                "SELECT role, content FROM learning_messages "
+                "WHERE session_id = ? AND chapter_id = ? ORDER BY created_at ASC",
+                (session_id, chapter_id)
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+
+    @staticmethod
+    def _sse_event(event: str, data: Dict[str, Any]) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def teach_chapter(self, session_id: str, chapter_id: int) -> Dict[str, Any]:
         """生成或读取章节讲解 + 宠物章末旁白。"""
@@ -393,13 +436,7 @@ README 摘要：
             raise LearningError("章节不存在", status=404)
 
         # 若已存在该章 teacher+pet 消息，直接复用（避免重复消耗 LLM）
-        async with get_db() as db:
-            cursor = await db.execute(
-                "SELECT role, content FROM learning_messages "
-                "WHERE session_id = ? AND chapter_id = ? ORDER BY created_at ASC",
-                (session_id, chapter_id)
-            )
-            existing = [dict(r) for r in await cursor.fetchall()]
+        existing = await self._get_chapter_messages(session_id, chapter_id)
         teacher_msg = next((m for m in existing if m["role"] == "teacher"), None)
         pet_msg = next((m for m in existing if m["role"] == "pet"), None)
         if teacher_msg and pet_msg:
@@ -418,32 +455,48 @@ README 摘要：
             chapter.get("focus_paths") or []
         )
 
-        # 老师讲解
+        # 老师讲解与宠物旁白并行生成（旁白只依赖章节信息，不依赖老师输出）
+        pet_persona = await self.get_pet_persona(row["pet_id"], row["pet_source"])
         teach_prompt = self._build_teach_prompt(
             chapter, row["repo_full_name"], row.get("repo_description") or "",
             files, chapter_id, len(chapters)
         )
-        teacher_content = await llm_service.chat(
-            [{"role": "user", "content": teach_prompt}],
-            temperature=0.4, max_tokens=2500, caller="learning_teach", timeout=90.0
-        ) or "（老师暂时讲不出来，请稍后重试）"
+        comment_prompt = (
+            self._build_pet_comment_prompt(pet_persona, chapter) if pet_persona else None
+        )
+
+        coros: List[Any] = [
+            llm_service.chat(
+                [{"role": "user", "content": teach_prompt}],
+                temperature=0.4, max_tokens=2500, caller="learning_teach", timeout=90.0
+            )
+        ]
+        if comment_prompt:
+            coros.append(
+                llm_service.chat(
+                    [{"role": "user", "content": comment_prompt}],
+                    temperature=0.9, max_tokens=1500, caller="learning_pet_comment", timeout=60.0
+                )
+            )
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
+        teacher_raw = results[0]
+        if isinstance(teacher_raw, Exception):
+            logger.error("[%s] 老师讲解生成异常: %s", session_id, teacher_raw)
+            teacher_raw = None
+        teacher_content = teacher_raw or "（老师暂时讲不出来，请稍后重试）"
 
         # 落库前截断，避免极端超长内容占用过多存储（LEARN-L-2）
         teacher_content = teacher_content[:MAX_TEACHER_CONTENT_LEN]
-
         await self._save_message(session_id, chapter_id, "teacher", teacher_content)
 
-        # 宠物旁白
-        pet_persona = await self.get_pet_persona(row["pet_id"], row["pet_source"])
         pet_comment = ""
-        if pet_persona:
-            comment_prompt = self._build_pet_comment_prompt(
-                pet_persona, chapter.get("title", ""), teacher_content
-            )
-            pet_comment = await llm_service.chat(
-                [{"role": "user", "content": comment_prompt}],
-                temperature=0.9, max_tokens=1500, caller="learning_pet_comment", timeout=60.0
-            ) or f"（{pet_persona.get('pet_name','宠物')}默默陪着主人听了这一章。）"
+        if pet_persona and comment_prompt:
+            pet_raw = results[1] if len(results) > 1 else None
+            if isinstance(pet_raw, Exception):
+                logger.error("[%s] 宠物旁白生成异常: %s", session_id, pet_raw)
+                pet_raw = None
+            pet_comment = pet_raw or f"（{pet_persona.get('pet_name','宠物')}默默陪着主人听了这一章。）"
             pet_comment = pet_comment[:MAX_PET_COMMENT_LEN * 2]  # 容忍一点超长，前端展示再裁剪
             await self._save_message(session_id, chapter_id, "pet", pet_comment)
 
@@ -454,6 +507,107 @@ README 摘要：
             "is_completed": self._is_chapter_rewarded(row, chapter_id),
             "intimacy_change": 0,
         }
+
+    async def teach_chapter_stream(self, session_id: str, chapter_id: int) -> AsyncIterator[str]:
+        """
+        流式生成章节讲解（SSE 事件序列）：
+        teacher_delta -> teacher_done -> pet_comment -> done；任何失败以 error 事件结束。
+        与非流式 teach_chapter 共用校验/复用/落库逻辑，旁白与老师讲解并行生成。
+        """
+        pet_task: Optional[asyncio.Task] = None
+        try:
+            row = await self.get_session_row(session_id)
+            if not row:
+                raise LearningError("学习会话不存在", status=404)
+
+            chapters = json.loads(row["outline_json"])
+            chapter = next((c for c in chapters if c["chapter_id"] == chapter_id), None)
+            if not chapter:
+                raise LearningError("章节不存在", status=404)
+
+            # 已有完整消息则直接回放，事件序列与实时生成保持一致
+            existing = await self._get_chapter_messages(session_id, chapter_id)
+            teacher_msg = next((m for m in existing if m["role"] == "teacher"), None)
+            pet_msg = next((m for m in existing if m["role"] == "pet"), None)
+            if teacher_msg and pet_msg:
+                yield self._sse_event("teacher_delta", {"text": teacher_msg["content"]})
+                yield self._sse_event("teacher_done", {"content": teacher_msg["content"]})
+                yield self._sse_event("pet_comment", {"comment": pet_msg["content"]})
+                yield self._sse_event("done", {
+                    "chapter_id": chapter_id,
+                    "is_completed": self._is_chapter_rewarded(row, chapter_id),
+                    "intimacy_change": 0,
+                })
+                return
+
+            default_branch = await self._guess_default_branch(row)
+            files = await github_service.fetch_chapter_files(
+                row["repo_owner"], row["repo_name"], default_branch,
+                chapter.get("focus_paths") or []
+            )
+
+            pet_persona = await self.get_pet_persona(row["pet_id"], row["pet_source"])
+            teach_prompt = self._build_teach_prompt(
+                chapter, row["repo_full_name"], row.get("repo_description") or "",
+                files, chapter_id, len(chapters)
+            )
+            comment_prompt = (
+                self._build_pet_comment_prompt(pet_persona, chapter) if pet_persona else None
+            )
+
+            # 宠物旁白与老师讲解并行（只依赖章节信息）
+            if comment_prompt:
+                pet_task = asyncio.create_task(
+                    llm_service.chat(
+                        [{"role": "user", "content": comment_prompt}],
+                        temperature=0.9, max_tokens=1500,
+                        caller="learning_pet_comment", timeout=60.0
+                    )
+                )
+
+            full_text = ""
+            async for chunk in llm_service.stream_chat(
+                [{"role": "user", "content": teach_prompt}],
+                llm_service.model, temperature=0.4, max_tokens=2500,
+                caller="learning_teach_stream", timeout=180.0
+            ):
+                full_text += chunk
+                yield self._sse_event("teacher_delta", {"text": chunk})
+
+            teacher_content = (
+                full_text[:MAX_TEACHER_CONTENT_LEN] if full_text.strip()
+                else "（老师暂时讲不出来，请稍后重试）"
+            )
+            await self._save_message(session_id, chapter_id, "teacher", teacher_content)
+            yield self._sse_event("teacher_done", {"content": teacher_content})
+
+            if pet_task is not None and pet_persona:
+                try:
+                    pet_raw = await pet_task
+                except Exception as e:
+                    logger.error("[%s] 宠物旁白生成异常: %s", session_id, e)
+                    pet_raw = None
+                if not pet_raw:
+                    pet_raw = f"（{pet_persona.get('pet_name','宠物')}默默陪着主人听了这一章。）"
+                pet_comment = pet_raw[:MAX_PET_COMMENT_LEN * 2]
+                await self._save_message(session_id, chapter_id, "pet", pet_comment)
+                yield self._sse_event("pet_comment", {"comment": pet_comment})
+
+            yield self._sse_event("done", {
+                "chapter_id": chapter_id,
+                "is_completed": self._is_chapter_rewarded(row, chapter_id),
+                "intimacy_change": 0,
+            })
+        except asyncio.CancelledError:
+            raise
+        except LearningError as e:
+            yield self._sse_event("error", {"message": e.message, "status": e.status})
+        except Exception as e:
+            logger.error("[%s] teach_chapter_stream 异常: %s: %s", session_id, type(e).__name__, e)
+            yield self._sse_event("error", {"message": "章节讲解生成失败，请稍后重试"})
+        finally:
+            if pet_task is not None and not pet_task.done():
+                pet_task.cancel()
 
     async def _guess_default_branch(self, row: dict) -> str:
         """获取默认分支；失败回退 main。"""

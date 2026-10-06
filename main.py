@@ -32,7 +32,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
-from backend.routers import sessions_router, chat_router, proactive_router, schedules_router, concerns_router, leisure_router
+from backend.routers import sessions_router, chat_router, proactive_router, schedules_router, concerns_router, leisure_router, weather_router
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.routers.visits import router as visits_router
 from backend.routers.learning import router as learning_router
@@ -100,6 +100,7 @@ app.include_router(proactive_router)
 app.include_router(schedules_router)
 app.include_router(concerns_router)
 app.include_router(leisure_router)
+app.include_router(weather_router)
 
 # 纯桌面端：不再对外托管 web 前端，仅保留本地 API 服务
 @app.get("/health")

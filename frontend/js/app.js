@@ -136,19 +136,32 @@ class ChatApp {
         const petEmojiEl = document.getElementById('pet-emoji');
         let avatarSet = false;
         
-        if (customAvatar) {
-            petEmojiEl.innerHTML = `<img src="${customAvatar}" alt="${petName}" class="pet-avatar-img" style="width: 70px; height: 70px; object-fit: cover; border-radius: 50%;">`;
+        if (customAvatar && /^data:image\//.test(customAvatar)) {
+            const img = document.createElement('img');
+            img.src = customAvatar;
+            img.alt = petName;
+            img.className = 'pet-avatar-img';
+            img.style.cssText = 'width: 70px; height: 70px; object-fit: cover; border-radius: 50%;';
+            petEmojiEl.replaceChildren(img);
             avatarSet = true;
         }
-        
+
         if (!avatarSet) {
             // 对于内置宠物，直接用 petType 查预置图；对于自定义宠物，用 rawPetType 查预置图
             const lookupType = isCustom ? rawPetType : this.petType;
             const presetImg = this.getPetPresetImage(lookupType);
             if (presetImg) {
-                petEmojiEl.innerHTML = `<img src="${presetImg}" alt="${petName}" class="pet-avatar-img" style="width: 70px; height: 70px; object-fit: cover; border-radius: 50%;">`;
+                const img = document.createElement('img');
+                img.src = presetImg;
+                img.alt = petName;
+                img.className = 'pet-avatar-img';
+                img.style.cssText = 'width: 70px; height: 70px; object-fit: cover; border-radius: 50%;';
+                petEmojiEl.replaceChildren(img);
             } else {
-                petEmojiEl.innerHTML = `<span class="pet-emoji-text">${petEmoji}</span>`;
+                const span = document.createElement('span');
+                span.className = 'pet-emoji-text';
+                span.textContent = petEmoji;
+                petEmojiEl.replaceChildren(span);
             }
         }
         
@@ -157,6 +170,62 @@ class ChatApp {
         document.getElementById('header-pet-name').textContent = petName;
         document.documentElement.style.setProperty('--pet-accent', petColor);
         document.documentElement.style.setProperty('--pet-accent-soft', this.hexToRgba(petColor, 0.16));
+    }
+
+    // 以 session 实际归属为准，校正 this.petType 与 localStorage，并同步主进程配置
+    async syncSessionIdentity(sessionResponse) {
+        const sessionPetType = sessionResponse && sessionResponse.pet_type;
+        if (!sessionPetType) return;
+
+        const sessionCustomPetId = sessionResponse.custom_pet_id || null;
+        const localCustomPetId = localStorage.getItem('qagent_custom_pet_id');
+        const mismatch = sessionPetType !== this.petType
+            || (sessionPetType === 'custom' && sessionCustomPetId && sessionCustomPetId !== localCustomPetId);
+        if (!mismatch) return;
+
+        this.petType = sessionPetType;
+        localStorage.setItem('qagent_pet_type', sessionPetType);
+
+        if (sessionPetType === 'custom') {
+            if (sessionCustomPetId) {
+                localStorage.setItem('qagent_custom_pet_id', sessionCustomPetId);
+            }
+            // 尽力恢复自定义宠物的名称/头像/原始类型
+            try {
+                const pets = await API.listCustomPets();
+                const pet = (pets.pets || pets || []).find(p => p.id === sessionCustomPetId);
+                if (pet) {
+                    localStorage.setItem('qagent_custom_pet', JSON.stringify(pet));
+                    localStorage.setItem('qagent_custom_pet_name', pet.pet_name || pet.name || '我的宠物');
+                    if (pet.avatar_url) {
+                        localStorage.setItem('qagent_custom_avatar', pet.avatar_url);
+                    } else {
+                        localStorage.removeItem('qagent_custom_avatar');
+                    }
+                }
+            } catch (e) {
+                console.warn('恢复自定义宠物信息失败:', e);
+            }
+        } else {
+            localStorage.removeItem('qagent_custom_pet_id');
+            localStorage.removeItem('qagent_custom_pet');
+            localStorage.removeItem('qagent_custom_pet_name');
+            localStorage.removeItem('qagent_custom_avatar');
+        }
+
+        // 同步主进程配置，避免 preload 下次用旧值再次覆盖 localStorage
+        try {
+            if (window.desktopAPI && window.desktopAPI.setConfig) {
+                await window.desktopAPI.setConfig({
+                    pet_type: sessionPetType,
+                    custom_pet_id: sessionPetType === 'custom' ? sessionCustomPetId : null
+                });
+            }
+        } catch (e) {
+            console.warn('同步主进程配置失败:', e);
+        }
+
+        this.renderPetInfo();
     }
 
     loadWelcomeMessage() {
@@ -179,6 +248,9 @@ class ChatApp {
                 API.getMemoryPanel(this.sessionId)
             ]);
             
+            // 以会话实际归属为准校正本地身份（防止 localStorage/主进程配置被串改后显示错宠物）
+            await this.syncSessionIdentity(sessionResponse);
+
             // 从后端同步亲密度和累计对话到侧边栏
             this.updateIntimacy(sessionResponse.intimacy);
             this.updateTotalChats(memoryData.total_chats);
@@ -237,6 +309,94 @@ class ChatApp {
         if (learnBtn) {
             learnBtn.addEventListener('click', () => this.goToLearn());
         }
+
+        const outfitBtn = document.getElementById('outfit-advice-btn');
+        if (outfitBtn) {
+            outfitBtn.addEventListener('click', () => this.showOutfitAdvice());
+        }
+
+        this.bindProactiveEvents();
+    }
+
+    /**
+     * 穿衣建议：调后端 /api/weather/outfit-advice（城市缺省时读用户画像 region），
+     * 结果渲染成一条宠物消息；400（未设置城市）时后端提示文案同样作为宠物消息展示。
+     * 返回是否查询成功，供「看看怎么穿」内联按钮决定是否移除。
+     */
+    async showOutfitAdvice(city = null) {
+        const btn = document.getElementById('outfit-advice-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '查询中…'; }
+        let ok = false;
+        try {
+            const result = await API.outfitAdvice(city);
+            const w = result.weather || {};
+            const rain = w.precip_probability ? `，降水概率${w.precip_probability}%` : '';
+            this.addMessage({
+                role: 'assistant',
+                content: `明天${result.city} ${w.text || ''}，气温 ${w.temp_min}~${w.temp_max}°C${rain}。${result.advice}`,
+                created_at: new Date().toISOString()
+            });
+            ok = true;
+        } catch (error) {
+            this.addMessage({ role: 'assistant', content: error.message, created_at: new Date().toISOString() });
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🌦 穿衣建议'; }
+        }
+        return ok;
+    }
+
+    /**
+     * 消费桌面端 proactive 事件（preload_web 注入 IPC；纯浏览器无 desktopAPI 时静默跳过）。
+     * 新源（久坐/喝水/睡觉/学习/天气）统一用后端 full_message（rendered_message）展示，
+     * weather_outfit 事件在操作区追加「看看怎么穿」就地出建议。
+     */
+    bindProactiveEvents() {
+        if (!(window.desktopAPI && window.desktopAPI.onProactiveEvent)) return;
+        window.desktopAPI.onProactiveEvent(async (event) => {
+            this.addMessage({
+                role: 'assistant',
+                content: event.full_message || '我来看看你。',
+                is_proactive: true,
+                created_at: new Date().toISOString()
+            });
+            try { await API.proactiveOpened(event.event_id, event.claim_token); } catch (error) {}
+            this.appendProactiveActions(event);
+        });
+    }
+
+    appendProactiveActions(event) {
+        const container = document.getElementById('messages-container');
+        const actions = document.createElement('div');
+        actions.className = 'proactive-actions';
+        const runAction = async (button, fn) => {
+            button.disabled = true;
+            try { await fn(); actions.remove(); }
+            catch (error) {
+                button.disabled = false;
+                this.addMessage({ role: 'assistant', content: `操作失败：${error.message}`, created_at: new Date().toISOString() });
+            }
+        };
+        [['知道了', 'acknowledge'], ['晚点提醒', 'snooze_10m'], ['完成', 'complete'], ['不再提醒', 'dismiss']].forEach(([label, action]) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = label;
+            button.addEventListener('click', () => runAction(button, () => API.proactiveAction(event.event_id, action, event.claim_token)));
+            actions.appendChild(button);
+        });
+        if (event.message_context?.kind === 'weather_outfit') {
+            const outfitButton = document.createElement('button');
+            outfitButton.type = 'button';
+            outfitButton.textContent = '看看怎么穿';
+            outfitButton.addEventListener('click', async () => {
+                outfitButton.disabled = true;
+                const ok = await this.showOutfitAdvice(event.message_context.city || null);
+                if (ok) outfitButton.remove();
+                else outfitButton.disabled = false;
+            });
+            actions.appendChild(outfitButton);
+        }
+        container.appendChild(actions);
+        container.scrollTop = container.scrollHeight;
     }
 
     /**
@@ -273,27 +433,39 @@ class ChatApp {
         }
         const petEmoji = this.getPetEmoji(isCustom ? rawPetType : this.petType);
         const customAvatar = isCustom ? localStorage.getItem('qagent_custom_avatar') : null;
-        let avatarHtml;
-        if (customAvatar) {
-            avatarHtml = `<img src="${customAvatar}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
+        let avatarNode;
+        const makeAvatarImg = (src) => {
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = '宠物';
+            img.style.cssText = 'width: 36px; height: 36px; object-fit: cover; border-radius: 50%;';
+            return img;
+        };
+        if (customAvatar && /^data:image\//.test(customAvatar)) {
+            avatarNode = makeAvatarImg(customAvatar);
         } else {
             const lookupType = isCustom ? rawPetType : this.petType;
             const presetImg = this.getPetPresetImage(lookupType);
             if (presetImg) {
-                avatarHtml = `<img src="${presetImg}" alt="宠物" style="width: 36px; height: 36px; object-fit: cover; border-radius: 50%;">`;
+                avatarNode = makeAvatarImg(presetImg);
             } else {
-                avatarHtml = `<span class="pet-emoji-small">${petEmoji}</span>`;
+                avatarNode = document.createElement('span');
+                avatarNode.className = 'pet-emoji-small';
+                avatarNode.textContent = petEmoji;
             }
         }
-        
+
         msgDiv.innerHTML = `
-            ${!isUser ? `<div class="pet-avatar">${avatarHtml}</div>` : ''}
+            ${!isUser ? '<div class="pet-avatar"></div>' : ''}
             <div class="message-content">
                 ${msg.is_proactive && !isUser ? '<span class="proactive-tag">主动关怀</span>' : ''}
                 <p>${this.escapeHtml(msg.content)}</p>
                 <span class="message-time">${time}</span>
             </div>
         `;
+        if (!isUser) {
+            msgDiv.querySelector('.pet-avatar').appendChild(avatarNode);
+        }
 
         const messagesContainer = document.getElementById('messages-container');
         messagesContainer.appendChild(msgDiv);
@@ -576,8 +748,13 @@ class ChatApp {
         // 保存原始值用于取消
         valueEl.dataset.original = currentValue;
         
-        // 替换显示值为输入框
-        valueEl.innerHTML = `<input type="text" class="profile-inline-input" id="input-${field}" value="${currentValue === '未知' ? '' : currentValue}">`;
+        // 替换显示值为输入框（用 DOM API 构建，避免画像文本中的引号突破 value 属性）
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'profile-inline-input';
+        input.id = `input-${field}`;
+        input.value = currentValue === '未知' ? '' : currentValue;
+        valueEl.replaceChildren(input);
         
         // 替换编辑按钮为保存/取消按钮
         actionsEl.innerHTML = `
@@ -586,7 +763,6 @@ class ChatApp {
         `;
         
         // 自动聚焦输入框
-        const input = document.getElementById(`input-${field}`);
         input.focus();
         input.select();
     }
@@ -666,6 +842,15 @@ class ChatApp {
             if (otherCustomPets.length >= 1 || allCustomPets.length >= 1) {
                 btn.style.display = 'block';
                 btn.addEventListener('click', () => this.openVisitModal(allCustomPets));
+
+                // 摸鱼页串门卡片跳转过来时直接弹出选宠弹窗,随后摘掉参数避免刷新时重复弹出
+                const params = new URLSearchParams(location.search);
+                if (params.get('visit') === 'open') {
+                    params.delete('visit');
+                    const query = params.toString();
+                    history.replaceState(null, '', location.pathname + (query ? `?${query}` : ''));
+                    this.openVisitModal(allCustomPets);
+                }
             }
         } catch (e) {
             console.warn('visit feature init failed:', e);

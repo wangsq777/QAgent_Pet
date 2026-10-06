@@ -8,6 +8,7 @@ from slowapi.util import get_remote_address
 from backend.database import get_db
 from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeRequest, SimulateTimeResponse, ErrorResponse, MemoryPanelResponse, UserProfileUpdateRequest, PetStatusResponse
 from backend.services.llm_service import llm_service
+from backend.services.pet_reminder_service import generate_share_daily_message, get_reminder_identity
 from backend.services.memory_service import memory_service
 from backend import prompts
 
@@ -379,52 +380,6 @@ async def get_pet_status(session_id: str, request: Request):
     )
 
 
-async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
-    """生成宠物分享日常的消息"""
-    daily_topics = {
-        "hot_dog": [
-            "主人不在的时候，汪汪把玩具球玩了一整天呢！",
-            "今天发现了一个超好玩的蝴蝶，汪汪追了它好久！",
-            "汪汪把最喜欢的狗窝整理了一下，现在超级舒服～",
-            "门口的小松鼠又来了，汪汪和它聊了一会儿天！",
-            "汪汪今天学会了新技能！主人回来要夸夸汪汪哦！"
-        ],
-        "cold_cat": [
-            "......今天阳光很好，本喵晒了一会儿太阳。",
-            "哼，那个逗猫棒被本喵成功捕获了。（才不是开心）",
-            "邻居的猫又来挑衅了，本喵懒得理它。",
-            "本喵今天睡了一个很舒服的午觉......才不是在等你。",
-            "窗外的鸟好吵，本喵决定无视它们。"
-        ],
-        "mouse": [
-            "鼠鼠今天找到了一颗超级好吃的瓜子！",
-            "鼠鼠把窝重新装修了一下，现在暖暖的～",
-            "鼠鼠鼓起勇气去探索了一下厨房，发现了好多新奇的东西！",
-            "今天鼠鼠学会了新舞步，想跳给主人看！",
-            "鼠鼠偷偷藏了一些好吃的，想和主人一起分享～"
-        ]
-    }
-    
-    import random
-    topic = random.choice(daily_topics.get(pet_type, daily_topics["hot_dog"]))
-    
-    # 用 LLM 生成更自然的表达
-    llm_content = await llm_service.generate_proactive_message(
-        pet_type, pet_name, f"分享日常生活：{topic}"
-    )
-    
-    if llm_content:
-        return llm_content
-    
-    # Fallback：直接返回话题
-    prefixes = {
-        "hot_dog": "汪汪！告诉主人一个好消息！",
-        "cold_cat": "......有个事情。",
-        "mouse": "鼠鼠有话想和主人说......"
-    }
-    return f"{prefixes.get(pet_type, '')}{topic}"
-
-
 @router.post("/{session_id}/share-daily")
 @limiter.limit("30/minute")
 async def share_daily(session_id: str, request: Request):
@@ -457,15 +412,10 @@ async def share_daily(session_id: str, request: Request):
         if pet_status == "hiding":
             return {"message": None, "reason": "pet_hiding"}
 
-        pet_prompts = {
-            "hot_dog": prompts.hot_dog,
-            "cold_cat": prompts.cold_cat,
-            "mouse": prompts.mouse
-        }
-        pet_info = pet_prompts.get(pet_type)
+        pet_name, pet_context = await get_reminder_identity(db, session_dict)
 
         # 生成日常分享消息
-        daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+        daily_content = await generate_share_daily_message(pet_type, pet_name, pet_context)
         
         # 保存消息
         await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
@@ -516,12 +466,7 @@ async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Req
         pet_status = session_dict["pet_status"]
         last_interaction = session_dict.get("last_interaction_at")
 
-        pet_prompts = {
-            "hot_dog": prompts.hot_dog,
-            "cold_cat": prompts.cold_cat,
-            "mouse": prompts.mouse
-        }
-        pet_info = pet_prompts.get(pet_type)
+        pet_name, pet_context = await get_reminder_identity(db, session_dict)
 
         proactive_message = None
         new_status = pet_status
@@ -546,8 +491,8 @@ async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Req
                 all_schedule_contents = "、".join([dict(s)['content'] for s in schedules])
                 schedule_content = f"提醒主人：{all_schedule_contents}"
                 proactive_content = await llm_service.generate_proactive_message(
-                    pet_type, pet_info.PET_NAME, schedule_content
-                ) or f"{pet_info.PET_NAME}提醒你：{all_schedule_contents}"
+                    pet_type, pet_name, schedule_content, pet_context=pet_context
+                ) or f"{pet_name}提醒你：{all_schedule_contents}"
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
                 
@@ -559,7 +504,7 @@ async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Req
                     )
             elif pet_type == "hot_dog":
                 proactive_content = await llm_service.generate_proactive_message(
-                    pet_type, pet_info.PET_NAME, "主人已经1天没互动了，我很想念主人！"
+                    pet_type, pet_name, "主人已经1天没互动了，我很想念主人！", pet_context=pet_context
                 ) or default_messages["hot_dog"]
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
@@ -570,21 +515,21 @@ async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Req
                     proactive_message = None
                 else:
                     proactive_content = await llm_service.generate_proactive_message(
-                        pet_type, pet_info.PET_NAME, "主人已经3天没互动了，我假装不在意但其实有点想主人。"
+                        pet_type, pet_name, "主人已经3天没互动了，我假装不在意但其实有点想主人。", pet_context=pet_context
                     ) or default_messages["cold_cat"]
                     proactive_message = {"role": "assistant", "content": proactive_content}
                     await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 
             elif pet_type == "mouse":
                 proactive_content = await llm_service.generate_proactive_message(
-                    pet_type, pet_info.PET_NAME, "主人已经2天没互动了，鼠鼠鼓起勇气打招呼。"
+                    pet_type, pet_name, "主人已经2天没互动了，鼠鼠鼓起勇气打招呼。", pet_context=pet_context
                 ) or default_messages["mouse"]
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
             
             # 模拟隔天后必定分享日常（即使宠物没有主动发消息）
             if pet_status != "hiding" and proactive_message is None:
-                daily_content = await generate_share_daily_message(pet_type, pet_info.PET_NAME)
+                daily_content = await generate_share_daily_message(pet_type, pet_name, pet_context)
                 proactive_message = {"role": "assistant", "content": daily_content}
                 await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
 
@@ -599,8 +544,8 @@ async def simulate_time(session_id: str, body: SimulateTimeRequest, request: Req
                 schedule_dict = dict(schedule)
                 schedule_content = f"提醒：{schedule_dict['content']}（时间: {schedule_dict['scheduled_time']}）"
                 proactive_content = await llm_service.generate_proactive_message(
-                    pet_type, pet_info.PET_NAME, schedule_content
-                ) or f"{pet_info.PET_NAME}提醒你：{schedule_dict['content']}"
+                    pet_type, pet_name, schedule_content, pet_context=pet_context
+                ) or f"{pet_name}提醒你：{schedule_dict['content']}"
                 proactive_message = {"role": "assistant", "content": proactive_content}
                 await memory_service.save_message(session_id, "assistant", proactive_content, is_proactive=True)
 

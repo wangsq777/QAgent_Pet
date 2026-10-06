@@ -14,7 +14,7 @@
   "author": "QAgent Pet",
   "license": "UNLICENSED",
   "devDependencies": {
-    "electron": "^33.2.1",
+    "electron": "^38.8.6",
     "electron-builder": "^25.1.8"
   },
   "build": {
@@ -28,8 +28,10 @@
       "preload.js",
       "preload_web.js",
       "preload_setup.js",
+      "preload_video_prompt.js",
       "feed_preload.js",
       "renderer/**/*",
+      "assets/tray-icon.png",
       "package.json"
     ],
     "extraResources": [

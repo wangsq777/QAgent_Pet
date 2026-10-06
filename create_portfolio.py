@@ -19,6 +19,7 @@ from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Inches, Pt, RGBColor
@@ -27,12 +28,15 @@ from docx.shared import Cm, Inches, Pt, RGBColor
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DOCX = ROOT / "output" / "docx" / "AI产品作品集-王思勤.docx"
 
+# Public repository backing every claim in this portfolio.
+REPO_URL = "https://github.com/wangsq777/QAgent_Pet"
+
 # Reference-PDF palette.
 BLUE = "2E75B6"
 DARK_BLUE = "1F4D78"
 LIGHT_BLUE = "EAF3FA"
 PALE_BLUE = "F5F9FC"
-INK = "333333"
+INK = "000000"
 MUTED = "666666"
 LIGHT_MUTED = "888888"
 GRID = "C7D3DD"
@@ -72,6 +76,50 @@ def set_run_font(
         run.bold = bold
     if italic is not None:
         run.italic = italic
+
+
+def add_hyperlink(
+    paragraph,
+    url: str,
+    text: str,
+    *,
+    size: float = 10.2,
+    color: str = INK,
+    bold: bool = False,
+) -> None:
+    """Append a real external hyperlink run to an existing paragraph.
+
+    The link is stored as an OOXML w:hyperlink with an external relationship,
+    so it stays clickable when the DOCX is opened in Word / WPS.
+    """
+    part = paragraph.part
+    r_id = part.relate_to(url, RT.HYPERLINK, is_external=True)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+    run = OxmlElement("w:r")
+    rPr = OxmlElement("w:rPr")
+    r_fonts = OxmlElement("w:rFonts")
+    r_fonts.set(qn("w:ascii"), LATIN_FONT)
+    r_fonts.set(qn("w:hAnsi"), LATIN_FONT)
+    r_fonts.set(qn("w:eastAsia"), CJK_FONT)
+    rPr.append(r_fonts)
+    size_el = OxmlElement("w:sz")
+    size_el.set(qn("w:val"), str(int(size * 2)))
+    rPr.append(size_el)
+    color_el = OxmlElement("w:color")
+    color_el.set(qn("w:val"), color)
+    rPr.append(color_el)
+    if bold:
+        rPr.append(OxmlElement("w:b"))
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    rPr.append(underline)
+    run.append(rPr)
+    text_el = OxmlElement("w:t")
+    text_el.text = text
+    run.append(text_el)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
 
 
 def set_cell_shading(cell, fill: str) -> None:
@@ -255,7 +303,7 @@ def configure_document(doc: Document) -> None:
     normal.paragraph_format.line_spacing = 1.10
 
     title = styles["Title"]
-    set_style_font(title, 30, DARK_BLUE, True)
+    set_style_font(title, 30, INK, True)
     title.paragraph_format.space_before = Pt(0)
     title.paragraph_format.space_after = Pt(6)
     title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -267,13 +315,13 @@ def configure_document(doc: Document) -> None:
     subtitle.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     h1 = styles["Heading 1"]
-    set_style_font(h1, 19, BLUE, True)
+    set_style_font(h1, 19, INK, True)
     h1.paragraph_format.space_before = Pt(0)
     h1.paragraph_format.space_after = Pt(12)
     h1.paragraph_format.keep_with_next = True
 
     h2 = styles["Heading 2"]
-    set_style_font(h2, 12.5, DARK_BLUE, True)
+    set_style_font(h2, 12.5, INK, True)
     h2.paragraph_format.space_before = Pt(9)
     h2.paragraph_format.space_after = Pt(5)
     h2.paragraph_format.keep_with_next = True
@@ -331,7 +379,7 @@ def configure_document(doc: Document) -> None:
     core.subject = "个人AI电子宠物伴侣：产品设计、Agent架构与桌宠MVP"
     core.author = "王思勤"
     core.keywords = "AI产品经理, Agent, 桌宠, 长期记忆, 情绪理解, Electron"
-    core.comments = "基于QAgent项目仓库2026-07-23状态更新"
+    core.comments = "基于QAgent项目仓库2026-08-24状态更新"
 
 
 def add_spacer(doc: Document, points: float) -> None:
@@ -412,7 +460,7 @@ def add_callout(doc: Document, label: str, text: str) -> None:
     p.paragraph_format.space_after = Pt(8)
     p.paragraph_format.line_spacing = 1.08
     label_run = p.add_run(f"{label}  ")
-    set_run_font(label_run, size=10.4, color=BLUE, bold=True)
+    set_run_font(label_run, size=10.4, color=INK, bold=True)
     body = p.add_run(text)
     set_run_font(body, size=10.4, color=INK)
     shade_paragraph(p, PALE_BLUE, GRID)
@@ -484,7 +532,7 @@ def build_cover(doc: Document) -> None:
         doc,
         "AI PRODUCT PORTFOLIO",
         size=9.5,
-        color=BLUE,
+        color=INK,
         align=WD_ALIGN_PARAGRAPH.CENTER,
         after=15,
     )
@@ -505,21 +553,28 @@ def build_cover(doc: Document) -> None:
     cover_meta = [
         ("项目属性", "个人项目 / AI 产品从 0 到 1"),
         ("核心角色", "AI 产品经理、原型开发与迭代负责人"),
-        ("产品形态", "Web 宠物控制中心 + Electron 桌宠 MVP"),
-        ("开发周期", "2026.04 - 2026.07（持续迭代）"),
-        ("当前阶段", "核心闭环已落地，进入桌宠体验增强与用户验证"),
+        ("产品形态", "Web 宠物控制中心 + Electron 桌宠 / 摸鱼小窗"),
+        ("开发周期", "2026.04 - 2026.08（持续迭代）"),
+        ("当前阶段", "桌宠与摸鱼中心落地，进入真实用户验证"),
     ]
     for label, value in cover_meta:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(5)
         r1 = p.add_run(f"{label}：")
-        set_run_font(r1, size=10.2, color=BLUE, bold=True)
+        set_run_font(r1, size=10.2, color=INK, bold=True)
         r2 = p.add_run(value)
         set_run_font(r2, size=10.2, color=INK)
 
+    repo_line = doc.add_paragraph()
+    repo_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    repo_line.paragraph_format.space_after = Pt(5)
+    r_label = repo_line.add_run("代码仓库：")
+    set_run_font(r_label, size=10.2, color=INK, bold=True)
+    add_hyperlink(repo_line, REPO_URL, "github.com/wangsq777/QAgent_Pet", size=10.2, color=INK, bold=True)
+
     add_spacer(doc, 28)
-    add_text(doc, "王思勤", size=12.5, color=DARK_BLUE, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
+    add_text(doc, "王思勤", size=12.5, color=INK, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
     add_text(
         doc,
         "源于腾讯 AI 产品校园大赛 QQ 赛道，现已演进为个人桌面端关系型 AI 产品",
@@ -537,7 +592,7 @@ def build_toc(doc: Document) -> None:
         "02  用户问题、定位与验证假设",
         "03  核心体验闭环与功能架构",
         "04  AI 产品设计：记忆与情绪",
-        "05  桌宠 MVP：双窗口与隐私边界",
+        "05  桌宠与摸鱼小窗：多窗口与隐私边界",
         "06  Agent 扩展：GitHub 陪学与宠物串门",
         "07  技术架构、选型与安全治理",
         "08  版本迭代与关键决策",
@@ -553,8 +608,9 @@ def build_toc(doc: Document) -> None:
         set_run_font(run, size=11.4, color=INK)
 
     add_subheading(doc, "本次更新重点")
-    add_bullet(doc, "产品定位从 QQ 赛道 Demo 更新为“个人 AI 电子宠物伴侣”，明确 Web 完整能力中心与桌宠轻入口的分工。")
-    add_bullet(doc, "补入已落地的 Electron 桌宠、2 字低敏提醒气泡、勿扰与托盘、五维情感结构、GitHub 陪学。")
+    add_bullet(doc, "补入摸鱼中心：小说阅读（内置书架 + 导入 TXT/EPUB/DOCX、自动分章、进度记忆）与 B站 / 小红书 / 抖音视频小窗。")
+    add_bullet(doc, "桌面从“双窗口”演进为多窗口矩阵：桌宠 / 轻聊天 / 小说阅读 / 视频小窗 / 设置 / Web 控制中心。")
+    add_bullet(doc, "同步 69 个 API 端点、24 张数据表的仓库快照，及桌宠交付（用户数据目录、每日备份、旧库迁移）。")
     add_bullet(doc, "所有成果基于本地仓库核验；待实现能力和待验证指标单独标注，不包装为现有成绩。")
 
 
@@ -574,7 +630,8 @@ def build_overview(doc: Document) -> None:
         [
             ["起点", "QQ 赛道 AI 宠物 Demo", "验证多角色对话、情绪感知与主动关怀"],
             ["能力扩展", "Web 宠物控制中心", "补齐记忆、画像、自定义宠物、串门与陪学"],
-            ["当前", "Electron 桌宠 MVP", "跑通桌面常驻、轻气泡、轻聊天与完整面板闭环"],
+            ["桌面化", "Electron 桌宠 MVP", "跑通桌面常驻、轻气泡、轻聊天与完整面板闭环"],
+            ["内容扩展", "摸鱼中心（小说 / 视频小窗）", "把长内容和碎片娱乐放进低打扰的置顶小窗"],
         ],
         [1500, 3000, 4860],
         first_col_bold=True,
@@ -586,6 +643,7 @@ def build_overview(doc: Document) -> None:
     add_bullet(doc, "记忆延续：最近对话、向量召回和长期摘要共同维持跨时间的关系连续性。")
     add_bullet(doc, "主动但克制：主动关怀有宠物差异，也有勿扰、频率和隐私边界。")
     add_bullet(doc, "关系可成长：亲密度、陪伴时长、连续互动和学习奖励把互动反馈为长期关系。")
+    add_bullet(doc, "低打扰内容入口：小说阅读与视频小窗把长内容和碎片娱乐藏进置顶小窗，随用随走，不打断主任务。")
 
 
 def build_positioning(doc: Document) -> None:
@@ -650,8 +708,8 @@ def build_core_loop(doc: Document) -> None:
             ["关系层", "人格、亲密度、主动关怀、轻养成状态", "宠物有性格，关系会变化"],
             ["认知层", "短期记忆、向量检索、长期摘要、用户画像", "它记得过去，也更了解我"],
             ["互动层", "聊天、情绪支持、日程、天气、日常分享", "能倾诉，也能处理轻任务"],
-            ["扩展层", "自定义宠物、宠物串门、GitHub 陪学", "角色可创造，陪伴可进入具体场景"],
-            ["终端层", "Web 三栏控制中心、Electron 桌宠、托盘与轻聊天", "完整能力与低打扰入口分离"],
+            ["扩展层", "自定义宠物、宠物串门、GitHub 陪学、摸鱼中心（小说 / 视频）", "角色可创造，陪伴可进入学习与摸鱼场景"],
+            ["终端层", "Web 三栏控制中心、Electron 桌宠、托盘、轻聊天、小说 / 视频小窗", "完整能力与低打扰入口分离，桌面小窗随用随走"],
         ],
         [1550, 4300, 3510],
         font_size=8.8,
@@ -700,23 +758,45 @@ def build_ai_design(doc: Document) -> None:
 
 
 def build_desktop(doc: Document) -> None:
-    add_section_title(doc, "05  桌宠 MVP：双窗口与隐私边界", "DESKTOP PET MVP")
+    add_section_title(doc, "05  桌宠与摸鱼小窗：多窗口与隐私边界", "DESKTOP PET MVP")
     add_text(
         doc,
-        "产品从 Web 走向桌面时，没有把完整聊天页缩进一个小浮窗，而是拆成“桌宠轻入口 + Web 完整中心”。这让常驻陪伴保持轻量，同时保留复杂功能的可用空间。",
+        "产品从 Web 走向桌面时，没有把完整聊天页缩进一个小浮窗，而是拆成“桌宠轻入口 + Web 完整中心 + 低打扰内容小窗”。这让常驻陪伴保持轻量，同时保留复杂功能的可用空间。",
         after=8,
     )
-    add_subheading(doc, "双窗口分工")
+    add_subheading(doc, "多窗口分工")
     add_table(
         doc,
-        ["终端", "承担任务", "关键交互"],
+        ["窗口", "承担任务", "关键交互"],
         [
-            ["桌宠小窗口", "陪伴感、轻触达、快速对话", "透明无边框、置顶、拖拽、2 字气泡、轻聊天"],
+            ["桌宠小窗 + 轻聊天", "陪伴感、轻触达、快速对话", "透明无边框、置顶、拖拽、2 字气泡、轻聊天"],
+            ["小说阅读窗", "内置书架 + 导入书自动分章，随时续读", "透明置顶、背景 / 文字透明度分离调节"],
+            ["视频小窗", "B站 / 小红书 / 抖音网页版随刷随走", "浮条控制、导航栏切换平台、关闭即销毁"],
             ["Web 完整中心", "聊天、记忆、学习、串门、自定义与设置", "三栏 App Shell、状态侧栏、功能导航"],
             ["系统托盘", "后台驻留与全局控制", "显示桌宠、打开面板、勿扰、切换宠物、退出"],
         ],
-        [1800, 3600, 3960],
-        font_size=9.0,
+        [2100, 3700, 3560],
+        font_size=8.6,
+        first_col_bold=True,
+        alternate_fill=True,
+    )
+
+    add_subheading(doc, "摸鱼中心：把长内容放进低打扰小窗")
+    add_text(
+        doc,
+        "摸鱼中心不在聊天流里堆工具，而是用独立置顶小窗承载长内容和碎片娱乐：随用随走，关闭即释放，不打断桌宠陪伴与主任务。",
+        after=6,
+    )
+    add_table(
+        doc,
+        ["能力", "实现方式", "产品取舍"],
+        [
+            ["小说阅读", "内置书架 + 导入 TXT / EPUB / DOCX（≤20MB），自动分章，章节 / 位置 / 百分比记忆进度", "导入书仅本人可见；透明小窗不透明度可调"],
+            ["视频小窗", "嵌入 B站 / 小红书 / 抖音网页版，浮条含后退 / 前进 / 刷新 / 缩放 / 置顶 / 收起 / 关闭", "只嵌平台网页 + 客户端隐藏提示，不调接口不抓数据"],
+            ["安全与隐私", "登录态用独立 partition 隔离；关闭即销毁窗口停止后台播放", "不读取页面脚本与数据，等同用户正常浏览"],
+        ],
+        [1550, 5050, 2760],
+        font_size=8.4,
         first_col_bold=True,
         alternate_fill=True,
     )
@@ -731,12 +811,12 @@ def build_desktop(doc: Document) -> None:
         doc,
         ["已实现 MVP", "暂不读取 / 暂未实现"],
         [
-            ["后端端口检测与自动拉起", "屏幕内容、窗口标题、聊天软件内容"],
+            ["后端端口检测与自动拉起、多窗口矩阵", "屏幕内容、窗口标题、聊天软件内容"],
             ["桌宠与 Web 共用 session 和记忆", "开机自启、位置记忆、多显示器适配"],
-            ["勿扰、托盘、切换预置宠物", "正式签名安装包与完整数据迁移"],
+            ["勿扰、托盘、切换预置宠物、应用数据目录与每日备份", "正式签名安装包与完整数据迁移"],
         ],
         [4680, 4680],
-        font_size=8.9,
+        font_size=8.7,
     )
 
 
@@ -787,11 +867,12 @@ def build_architecture(doc: Document) -> None:
         doc,
         ["层", "实现", "产品考量"],
         [
-            ["桌面层", "Electron 主进程、预加载桥接、桌宠/轻聊天渲染页", "复用 Web 资产，快速验证桌面闭环"],
+            ["桌面层", "Electron 多窗口（桌宠 / 聊天 / 小说 / 视频 / 设置 / 控制中心）", "复用 Web 资产，快速验证桌面闭环"],
             ["表现层", "原生 HTML / CSS / JavaScript", "MVP 迭代快、依赖轻"],
-            ["服务层", "FastAPI + 30 个 API 端点", "异步等待 LLM / GitHub / 天气服务"],
+            ["服务层", "FastAPI + 69 个 API 端点", "异步等待 LLM / GitHub / 天气 / 小说导入服务"],
             ["AI 层", "MiniMax Anthropic Messages 兼容接口 + 分层 Prompt", "支持多调用链路、保留供应商切换空间"],
-            ["数据层", "SQLite + aiosqlite + WAL + 12 张表", "单机 MVP 零运维，便于本地数据连续性"],
+            ["内容层", "小说导入 / 自动分章 / 进度记忆、摸鱼会话与设置", "长内容进入低打扰桌面小窗"],
+            ["数据层", "SQLite + aiosqlite + WAL + 24 张表", "单机 MVP 零运维，便于本地数据连续性"],
             ["记忆层", "短期消息、长期摘要、Embedding 向量表", "在成本与记忆体验间折中"],
         ],
         [1500, 4400, 3460],
@@ -808,7 +889,7 @@ def build_architecture(doc: Document) -> None:
             ["身份与越权", "X-User-Id 校验、session / pet 归属检查、API Key 中间件", "生产环境强制配置 API Key"],
             ["Prompt 注入", "输入清洗、仓库内容隔离、工具白名单与参数校验", "迁移为平台级结构化 tool calling"],
             ["网络与资源", "GitHub SSRF 防护、禁重定向、请求体限制、限流", "全局 LLM 并发上限"],
-            ["本地数据", "SQLite 权限尝试设为 0o600、WAL、索引", "应用数据目录、备份恢复、正式持久化"],
+            ["本地数据", "SQLite 0o600 权限、WAL、索引、应用数据目录、每日备份保留 5 份", "正式签名安装包、生产级持久化"],
         ],
         [1900, 4500, 2960],
         font_size=8.4,
@@ -830,6 +911,8 @@ def build_timeline(doc: Document) -> None:
             ["2026.07.01", "情感捕捉细化", "reply/emotion/need/intensity/risk_level 五维结构"],
             ["2026.07.03", "Web 软件化", "三栏控制中心、状态与轻养成、桌宠预览与设置"],
             ["2026.07.06-07", "Electron 桌宠 MVP", "透明置顶、2 字气泡、轻聊天、托盘、会话共享、归属加固"],
+            ["2026.07.16", "桌宠交付与统一前端", "设置窗、产品图标 / 托盘、用户数据目录、每日备份、旧库迁移"],
+            ["2026.08.24", "摸鱼中心落地", "小说导入 / 自动分章 / 进度记忆、B站 / 小红书 / 抖音视频小窗、统一前端体验"],
         ],
         [1900, 2600, 4860],
         font_size=8.5,
@@ -837,33 +920,43 @@ def build_timeline(doc: Document) -> None:
         alternate_fill=True,
     )
 
-    add_subheading(doc, "三次关键取舍")
+    add_subheading(doc, "四次关键取舍")
     add_bullet(doc, "先用规则做主动关怀：MVP 要先验证“主动是否被接受”，再把复杂触发交给 Agent。")
     add_bullet(doc, "保留原生 Web 前端：桌面化改造重点是窗口职责与交互形态，不为技术栈升级而重写。")
     add_bullet(doc, "气泡只做召回，不承载完整内容：把陪伴感、隐私和打扰成本放在同一个决策里权衡。")
     add_bullet(doc, "后台 Agent 不阻塞主回复：画像和情绪趋势允许失败降级，先守住核心对话可用性。")
+    add_bullet(doc, "内容进独立小窗而非聊天流：小说和视频用独立置顶小窗承载，让陪伴与内容消费互不干扰。")
 
     add_callout(doc, "迭代方法", "每个版本都同时检查用户可感知价值、技术边界和安全风险；规划文档只保留未完成项，已实现内容进入更新记录。")
 
 
 def build_evidence(doc: Document) -> None:
     add_section_title(doc, "09  实现证据与个人贡献", "EVIDENCE & ROLE")
-    add_subheading(doc, "仓库快照（2026-07-23）")
+    add_subheading(doc, "仓库快照（2026-08-24）")
     add_table(
         doc,
         ["证据维度", "核验结果", "说明"],
         [
-            ["核心代码规模", "15,040 行", "排除 node_modules 与 dist 后统计"],
-            ["后端接口", "30 个 API 端点", "会话、聊天、自定义、串门、陪学"],
-            ["数据模型", "12 张 SQLite 表", "关系、记忆、画像、串门、学习完整落库"],
-            ["工程文件", "30 Python / 8 HTML / 9 CSS / 9 JS", "覆盖后端、Web 与 Electron"],
-            ["测试资产", "5 个本地测试脚本", "记忆、学习归属、天气与 API 等"],
+            ["核心代码规模", "21,900 行", "排除 node_modules、dist 与构建产物后统计"],
+            ["后端接口", "69 个 API 端点", "会话、聊天、自定义、串门、陪学、摸鱼"],
+            ["数据模型", "24 张 SQLite 表", "关系、记忆、画像、串门、学习、小说、摸鱼完整落库"],
+            ["工程文件", "52 Python / 12 HTML / 12 CSS / 16 JS", "覆盖后端、Web 与 Electron"],
+            ["测试资产", "delivery foundation 单元测试", "数据目录优先、legacy 数据库迁移、每日备份"],
         ],
         [2100, 1900, 5360],
         font_size=8.8,
         first_col_bold=True,
         alternate_fill=True,
     )
+
+    repo_note = doc.add_paragraph()
+    repo_note.paragraph_format.space_before = Pt(2)
+    repo_note.paragraph_format.space_after = Pt(4)
+    r_note = repo_note.add_run("公开仓库：")
+    set_run_font(r_note, size=8.8, color=MUTED, bold=True)
+    add_hyperlink(repo_note, REPO_URL, "https://github.com/wangsq777/QAgent_Pet", size=8.8, color=INK)
+    r_note2 = repo_note.add_run("（以上证据均可在此仓库核验）")
+    set_run_font(r_note2, size=8.8, color=MUTED, italic=True)
 
     add_subheading(doc, "我的角色与产出")
     add_table(
@@ -872,9 +965,10 @@ def build_evidence(doc: Document) -> None:
         [
             ["产品定义", "完成定位转型、用户场景、双终端职责、Phase 0-4 路线与验收标准"],
             ["AI 产品设计", "设计分层记忆、五维情感信号、后台画像 Agent、多角色上下文隔离"],
-            ["交互与体验", "设计三栏控制中心、2 字气泡、轻聊天、勿扰与托盘路径"],
+            ["交互与体验", "设计三栏控制中心、2 字气泡、轻聊天、勿扰与托盘路径、小说 / 视频小窗"],
+            ["场景扩展", "定义摸鱼中心（小说阅读 / 视频小窗），把长内容与碎片娱乐放进低打扰小窗"],
             ["原型实现", "推动 FastAPI、原生 Web、Electron、SQLite 形成可运行 MVP"],
-            ["质量治理", "持续维护 bug / 安全 / 更新文档，完成身份归属、注入与 SSRF 等收口"],
+            ["质量治理", "持续维护 bug / 安全 / 更新文档，完成身份归属、注入、SSRF 与数据隔离收口"],
         ],
         [2200, 7160],
         font_size=8.8,
@@ -898,7 +992,8 @@ def build_roadmap(doc: Document) -> None:
         ["优先级", "要做什么", "为什么现在做"],
         [
             ["P0 用户验证", "5-8 位目标用户连续使用 7 天，记录提醒接受度、记忆体验和留存原因", "先验证关系型桌宠是否产生真实复访"],
-            ["P1 桌宠增强", "开机自启、位置记忆、多屏、通知隐私、应用数据目录", "把“能跑”提升到“适合长期挂着”"],
+            ["P1 桌宠增强", "开机自启、位置记忆、多屏适配、通知隐私（应用数据目录与每日备份已落地）", "把“能跑”提升到“适合长期挂着”"],
+            ["P1 摸鱼验证", "小说阅读留存、视频小窗使用频次、导入失败率与进度恢复体验", "验证低打扰内容入口是否带来真实复访"],
             ["P1 主动关怀", "统一主动服务、全局频控、天气穿衣建议与学习提醒", "减少重复逻辑并验证主动价值"],
             ["P2 工程质量", "全局 LLM 并发、事务加固、pytest + mock、结构化 tool calling", "为长期运行和迭代建立稳定底座"],
         ],
@@ -929,7 +1024,7 @@ def build_roadmap(doc: Document) -> None:
     add_bullet(doc, "产品原则：让宠物更懂用户，但不越界；更主动，但不打扰；更拟人，但不冒充真人或专业服务。")
 
     add_spacer(doc, 8)
-    add_text(doc, "谢谢阅读", size=18, color=BLUE, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
+    add_text(doc, "谢谢阅读", size=18, color=INK, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
     add_text(doc, "QAgent Pet  |  王思勤", size=9.5, color=LIGHT_MUTED, align=WD_ALIGN_PARAGRAPH.CENTER, after=0)
 
 

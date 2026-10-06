@@ -157,6 +157,65 @@ async def _migrate_novel_books_for_import(db) -> None:
     logger.info("Migrated novel_books: relaxed content_source and added owner columns")
 
 
+PROACTIVE_SOURCE_TYPES = ('schedule','concern','emotion_followup','inactivity','pet_initiated',
+                          'sedentary','hydration','sleep','learning_nudge','learning_celebrate','weather')
+
+
+async def _migrate_proactive_events_sources(db) -> None:
+    """扩展 proactive_events.source_type 的 CHECK 白名单。
+
+    SQLite 无法原地修改 CHECK 约束，按 novel_books 的既有做法重建表：
+    检测到旧 DDL 缺少新来源时，建新表 -> 拷数据 -> 删旧表 -> 重建索引。
+    幂等：新 schema 的库直接跳过。
+    """
+    cursor = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='proactive_events'")
+    row = await cursor.fetchone()
+    ddl = row[0] if row else ""
+    if not ddl or "'sedentary'" in ddl:
+        return  # 已迁移（或新建库自带新 schema）
+
+    await db.execute("ALTER TABLE proactive_events RENAME TO proactive_events_legacy")
+    await db.execute("""
+        CREATE TABLE proactive_events (
+            event_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            source_type TEXT NOT NULL CHECK(source_type IN ('schedule','concern','emotion_followup','inactivity','pet_initiated','sedentary','hydration','sleep','learning_nudge','learning_celebrate','weather')),
+            source_ref_id TEXT,
+            dedupe_key TEXT UNIQUE,
+            scheduled_at_utc DATETIME NOT NULL,
+            expires_at_utc DATETIME,
+            priority INTEGER NOT NULL DEFAULT 50 CHECK(priority BETWEEN 0 AND 100),
+            sensitivity TEXT NOT NULL DEFAULT 'low' CHECK(sensitivity IN ('low','medium','high')),
+            bubble_text TEXT NOT NULL,
+            message_context_json TEXT,
+            rendered_message TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','claimed','delivered','opened','snoozed','completed','cancelled','expired','failed')),
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            claim_token TEXT,
+            claim_expires_at_utc DATETIME,
+            delivered_at_utc DATETIME,
+            opened_at_utc DATETIME,
+            completed_at_utc DATETIME,
+            last_error TEXT,
+            created_at_utc DATETIME NOT NULL,
+            updated_at_utc DATETIME NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            FOREIGN KEY (session_id) REFERENCES pet_sessions(session_id)
+        )
+    """)
+    await db.execute("""
+        INSERT INTO proactive_events(event_id,user_id,session_id,source_type,source_ref_id,dedupe_key,scheduled_at_utc,expires_at_utc,priority,sensitivity,bubble_text,message_context_json,rendered_message,status,attempt_count,claim_token,claim_expires_at_utc,delivered_at_utc,opened_at_utc,completed_at_utc,last_error,created_at_utc,updated_at_utc)
+        SELECT event_id,user_id,session_id,source_type,source_ref_id,dedupe_key,scheduled_at_utc,expires_at_utc,priority,sensitivity,bubble_text,message_context_json,rendered_message,status,attempt_count,claim_token,claim_expires_at_utc,delivered_at_utc,opened_at_utc,completed_at_utc,last_error,created_at_utc,updated_at_utc
+        FROM proactive_events_legacy
+    """)
+    await db.execute("DROP TABLE proactive_events_legacy")
+    # DROP TABLE 会连带删除索引，这里按 init 里的定义重建
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_proactive_due ON proactive_events(user_id, session_id, status, scheduled_at_utc)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_proactive_source ON proactive_events(source_type, source_ref_id)")
+    logger.info("Migrated proactive_events: extended source_type CHECK whitelist")
+
+
 async def init_database():
     _ensure_database_parent()
     migrate_legacy_database(DATABASE_PATH)
@@ -233,7 +292,7 @@ async def init_database():
                 event_id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 session_id TEXT NOT NULL,
-                source_type TEXT NOT NULL CHECK(source_type IN ('schedule','concern','emotion_followup','inactivity','pet_initiated')),
+                source_type TEXT NOT NULL CHECK(source_type IN ('schedule','concern','emotion_followup','inactivity','pet_initiated','sedentary','hydration','sleep','learning_nudge','learning_celebrate','weather')),
                 source_ref_id TEXT,
                 dedupe_key TEXT UNIQUE,
                 scheduled_at_utc DATETIME NOT NULL,
@@ -259,6 +318,8 @@ async def init_database():
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_proactive_due ON proactive_events(user_id, session_id, status, scheduled_at_utc)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_proactive_source ON proactive_events(source_type, source_ref_id)")
+        # 旧库的 source_type CHECK 不含新来源，SQLite 无法原地改约束，需重建表（幂等）
+        await _migrate_proactive_events_sources(db)
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS proactive_settings (
@@ -275,12 +336,31 @@ async def init_database():
                 emotion_followup_enabled INTEGER NOT NULL DEFAULT 0,
                 inactivity_enabled INTEGER NOT NULL DEFAULT 1,
                 pet_initiated_enabled INTEGER NOT NULL DEFAULT 1,
+                sedentary_enabled INTEGER NOT NULL DEFAULT 1,
+                hydration_enabled INTEGER NOT NULL DEFAULT 1,
+                sleep_enabled INTEGER NOT NULL DEFAULT 1,
+                learning_enabled INTEGER NOT NULL DEFAULT 1,
+                weather_enabled INTEGER NOT NULL DEFAULT 1,
                 privacy_level TEXT NOT NULL DEFAULT 'generic',
                 created_at_utc DATETIME NOT NULL,
                 updated_at_utc DATETIME NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        # 扩展 proactive_settings：Phase 3 新增事件源开关（additive，幂等）
+        for col_sql in [
+            "ALTER TABLE proactive_settings ADD COLUMN sedentary_enabled INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE proactive_settings ADD COLUMN hydration_enabled INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE proactive_settings ADD COLUMN sleep_enabled INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE proactive_settings ADD COLUMN learning_enabled INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE proactive_settings ADD COLUMN weather_enabled INTEGER NOT NULL DEFAULT 1",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception as e:
+                if "duplicate column name" not in str(e).lower():
+                    logger.error("Migration failed: %s — %s", col_sql, e)
+                    raise
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS schedule_candidates (
@@ -516,6 +596,22 @@ async def init_database():
                 if "duplicate column name" not in str(e).lower():
                     logger.error("Migration failed: %s — %s", col_sql, e)
                     raise
+
+        # 用户事件流：主 Agent 每轮情绪标签、情绪趋势分析结果、画像变更的追加式记录。
+        # user_profiles 只保留聚合后的最新快照，时序信息全部沉淀在这里。
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_events (
+                event_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                session_id TEXT,
+                event_type TEXT NOT NULL CHECK(event_type IN ('emotion_observed','mood_analyzed','profile_updated')),
+                payload_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_events_user_time ON user_events(user_id, created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_events_type_time ON user_events(user_id, event_type, created_at)")
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS pet_visits (

@@ -121,3 +121,100 @@ body {
   0%, 100% { transform: translateX(-50%) translateY(0); }
   50% { transform: translateX(-50%) translateY(-4px); }
 }
+
+/* ---- 五态动画:pet.js 把状态写成 pet-shell 的 state-* class,切换即重启动画 ---- */
+
+/* idle:未命中任何状态 class 时保持默认 petBreath(见 .pet-image)。 */
+
+/* happy:轻快小跳(节奏快于呼吸)+ 音符上浮淡出 */
+.pet-shell.state-happy .pet-image {
+  animation: petHappyBounce 0.9s ease-in-out infinite;
+}
+
+.pet-shell.state-happy .pet-button::after {
+  content: "🎵";
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 16px;
+  pointer-events: none;
+  animation: petNoteFloat 1.6s ease-out infinite;
+}
+
+/* lonely:降饱和 + 呼吸变慢 + 轻微倾斜 */
+.pet-shell.state-lonely .pet-image {
+  animation: petLonelyBreath 4.2s ease-in-out infinite;
+  filter: grayscale(0.5);
+}
+
+/* sleepy:微压暗 + 缓慢摇摆 + Zzz 上浮淡出 */
+.pet-shell.state-sleepy .pet-image {
+  animation: petSleepySway 4.5s ease-in-out infinite;
+  filter: brightness(0.85);
+}
+
+.pet-shell.state-sleepy .pet-button::after {
+  content: "Zzz";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #7c8db0;
+  pointer-events: none;
+  animation: petZzzFloat 2.4s ease-out infinite;
+}
+
+/* studying:轻微节奏点头 + 📖 角标微浮动 */
+.pet-shell.state-studying .pet-image {
+  animation: petStudyingNod 2.4s ease-in-out infinite;
+}
+
+.pet-shell.state-studying .pet-button::after {
+  content: "📖";
+  position: absolute;
+  bottom: 30px;
+  right: 4px;
+  font-size: 15px;
+  pointer-events: none;
+  animation: petBookFloat 2.2s ease-in-out infinite;
+}
+
+@keyframes petHappyBounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30% { transform: translateY(-10px) rotate(-4deg); }
+  60% { transform: translateY(-2px) rotate(3deg); }
+}
+
+@keyframes petNoteFloat {
+  0% { opacity: 0; transform: translateY(6px) scale(0.8); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-18px) scale(1.1); }
+}
+
+@keyframes petLonelyBreath {
+  0%, 100% { transform: translateY(0) rotate(-3deg) scale(1); }
+  50% { transform: translateY(-3px) rotate(-3deg) scale(1.015); }
+}
+
+@keyframes petSleepySway {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-3px) rotate(2deg); }
+}
+
+@keyframes petZzzFloat {
+  0% { opacity: 0; transform: translateY(4px) scale(0.8); }
+  30% { opacity: 0.9; }
+  100% { opacity: 0; transform: translateY(-14px) scale(1.05); }
+}
+
+@keyframes petStudyingNod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  40% { transform: translateY(2px) rotate(2.5deg); }
+  70% { transform: translateY(0) rotate(-1deg); }
+}
+
+@keyframes petBookFloat {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50% { transform: translateY(-4px) rotate(6deg); }
+}

@@ -1,7 +1,9 @@
+import asyncio
+
 import httpx
 import json
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncIterator
 
 
 def _sanitize_prompt_input(text: str) -> str:
@@ -92,12 +94,15 @@ class LLMService:
 
         return text
 
-    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown", timeout: float = 30.0) -> Optional[str]:
+    def _build_request(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int
+    ) -> tuple:
+        """构建 Anthropic 协议的 (url, headers, payload)；system 消息拆为独立字段。"""
         api_key = settings.LLM_API_KEY
-        if not api_key:
-            logger.warning("No API key configured")
-            return None
-
         url = f"{self.base_url}/v1/messages"
         headers = {
             "x-api-key": api_key,
@@ -130,54 +135,80 @@ class LLMService:
         if "MiniMax-M2" in model:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-        logger.debug("[%s] Calling LLM...", caller)
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                logger.debug("[%s] Raw response keys: %s", caller, list(data.keys()))
+        return url, headers, payload
 
-                # 尝试 Anthropic 格式: 遍历 content 列表找 type=="text" 的块
-                # MiniMax 会在 content[0] 放 thinking 块，实际文本在后面
-                content = None
-                content_list = data.get("content")
-                if isinstance(content_list, list) and content_list:
-                    for block in content_list:
-                        if isinstance(block, str):
-                            content = block
-                            break
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            content = block.get("text")
-                            break
-                    if content is None:
-                        stop_reason = data.get("stop_reason")
-                        usage = data.get("usage")
-                        logger.warning(
-                            "[%s] No text block found in content (token budget likely exhausted) "
-                            "stop_reason=%s usage=%s blocks=%s",
-                            caller, stop_reason, usage, str(content_list)[:200]
-                        )
-                # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
-                elif "choices" in data:
-                    content = data["choices"][0]["message"]["content"]
-                else:
-                    logger.error("[%s] Unexpected response structure: %s", caller, str(data)[:300])
-                    return None
+    async def _call_llm(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, caller: str = "unknown", timeout: float = 30.0) -> Optional[str]:
+        api_key = settings.LLM_API_KEY
+        if not api_key:
+            logger.warning("No API key configured")
+            return None
 
-                logger.debug("[%s] Raw content: %s", caller, repr(content[:100]) if content else None)
-                cleaned = self._clean_response(content)
-                logger.debug("[%s] Cleaned content: %s, length: %d", caller, repr(cleaned[:100]) if cleaned else None, len(cleaned) if cleaned else 0)
-                return cleaned
-        except httpx.HTTPStatusError as e:
-            logger.error("[%s] HTTP error: %d - %s", caller, e.response.status_code, e.response.text[:200])
-            return None
-        except httpx.RequestError as e:
-            logger.error("[%s] Request error: %s: %s", caller, type(e).__name__, e)
-            return None
-        except Exception as e:
-            logger.error("[%s] Unexpected error: %s: %s", caller, type(e).__name__, e)
-            return None
+        url, headers, payload = self._build_request(messages, model, temperature, max_tokens)
+
+        max_attempts = settings.LLM_RETRY_ATTEMPTS + 1
+        retryable_statuses = {429, 500, 502, 503, 504}
+
+        for attempt in range(max_attempts):
+            logger.debug("[%s] Calling LLM... (attempt %d/%d)", caller, attempt + 1, max_attempts)
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    logger.debug("[%s] Raw response keys: %s", caller, list(data.keys()))
+
+                    # 尝试 Anthropic 格式: 遍历 content 列表找 type=="text" 的块
+                    # MiniMax 会在 content[0] 放 thinking 块，实际文本在后面
+                    content = None
+                    content_list = data.get("content")
+                    if isinstance(content_list, list) and content_list:
+                        for block in content_list:
+                            if isinstance(block, str):
+                                content = block
+                                break
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                content = block.get("text")
+                                break
+                        if content is None:
+                            stop_reason = data.get("stop_reason")
+                            usage = data.get("usage")
+                            logger.warning(
+                                "[%s] No text block found in content (token budget likely exhausted) "
+                                "stop_reason=%s usage=%s blocks=%s",
+                                caller, stop_reason, usage, str(content_list)[:200]
+                            )
+                    # 兼容 OpenAI 格式: data["choices"][0]["message"]["content"]
+                    elif "choices" in data:
+                        content = data["choices"][0]["message"]["content"]
+                    else:
+                        logger.error("[%s] Unexpected response structure: %s", caller, str(data)[:300])
+                        return None
+
+                    logger.debug("[%s] Raw content: %s", caller, repr(content[:100]) if content else None)
+                    cleaned = self._clean_response(content)
+                    logger.debug("[%s] Cleaned content: %s, length: %d", caller, repr(cleaned[:100]) if cleaned else None, len(cleaned) if cleaned else 0)
+                    return cleaned
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                logger.error("[%s] HTTP error: %d - %s", caller, status, e.response.text[:200])
+                if status in retryable_statuses and attempt < max_attempts - 1:
+                    delay = settings.LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning("[%s] Retryable HTTP %d, retrying in %.1fs (attempt %d)", caller, status, delay, attempt + 1)
+                    await asyncio.sleep(delay)
+                    continue
+                return None
+            except httpx.RequestError as e:
+                logger.error("[%s] Request error: %s: %s", caller, type(e).__name__, e)
+                if attempt < max_attempts - 1:
+                    delay = settings.LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning("[%s] Retryable request error, retrying in %.1fs (attempt %d)", caller, delay, attempt + 1)
+                    await asyncio.sleep(delay)
+                    continue
+                return None
+            except Exception as e:
+                logger.error("[%s] Unexpected error: %s: %s", caller, type(e).__name__, e)
+                return None
+        return None
 
     async def chat(
         self,
@@ -188,6 +219,69 @@ class LLMService:
         timeout: float = 30.0
     ) -> Optional[str]:
         return await self._call_llm(messages, self.model, temperature, max_tokens, caller=caller, timeout=timeout)
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        caller: str = "stream",
+        timeout: float = 180.0
+    ) -> AsyncIterator[str]:
+        """
+        流式调用 LLM，逐块 yield 文本增量。
+
+        请求构建与 _call_llm 一致，仅追加 "stream": True。
+        只转发 text_delta（过滤 thinking_delta）；message_stop/[DONE]/流关闭结束。
+        不做分块级重试：连接前错误（状态码/网络）抛异常，由调用方转为 error 事件；
+        流中途断开由 httpx 抛异常，同样交由调用方处理。
+        """
+        api_key = settings.LLM_API_KEY
+        if not api_key:
+            logger.warning("[%s] No API key configured", caller)
+            return
+
+        url, headers, payload = self._build_request(messages, model, temperature, max_tokens)
+        payload["stream"] = True
+
+        logger.debug("[%s] Streaming LLM...", caller)
+        timeout_cfg = httpx.Timeout(timeout, connect=30.0)
+        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith(":"):
+                        continue
+                    if stripped == "[DONE]" or stripped == "data: [DONE]":
+                        break
+                    if not stripped.startswith("data:"):
+                        continue
+                    data_str = stripped[len("data:"):].strip()
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(data, dict):
+                        continue
+                    # Anthropic SSE：只转发 text_delta，跳过 thinking_delta 等
+                    if data.get("type") == "content_block_delta":
+                        delta = data.get("delta") or {}
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text")
+                            if text:
+                                yield text
+                        continue
+                    if data.get("type") == "message_stop":
+                        break
+                    # OpenAI 兼容：choices[0].delta.content
+                    choices = data.get("choices")
+                    if choices:
+                        delta = (choices[0] or {}).get("delta") or {}
+                        text = delta.get("content")
+                        if text:
+                            yield text
 
     async def generate_welcome_message(self, pet_type: str, pet_name: str, pet_personality: str) -> str:
         # 根据宠物类型定制欢迎语 prompt
@@ -260,13 +354,16 @@ class LLMService:
             return result
         return ""
 
-    async def generate_proactive_message(self, pet_type: str, pet_name: str, reason: str) -> Optional[str]:
+    async def generate_proactive_message(self, pet_type: str, pet_name: str, reason: str, *, pet_context: str = "") -> Optional[str]:
         prompt = f"""你是 {pet_name}。
 原因：{reason}
 请用你的性格风格，写一句主动关心主人的消息（40字以内）。
 直接输出消息内容，不要任何解释。"""
 
-        messages = [{"role": "user", "content": prompt}]
+        messages = []
+        if pet_context:
+            messages.append({"role": "system", "content": pet_context})
+        messages.append({"role": "user", "content": prompt})
         return await self.chat(messages, temperature=0.9, max_tokens=1000, caller=f"proactive_{pet_type}")
 
     async def extract_emotion(self, user_message: str, pet_type: str) -> str:

@@ -9,11 +9,13 @@ from slowapi.util import get_remote_address
 from backend.database import get_db
 from backend.schemas import ChatRequest, ChatResponse, MessageListResponse
 from backend.services.llm_service import llm_service
+from backend.services.pet_reminder_service import generate_share_daily_message, get_reminder_identity
 from backend.services.memory_service import memory_service
 from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
 from backend.services.user_profile_agent import user_profile_agent
 from backend.services.mood_agent import mood_agent
+from backend.services.event_service import event_service
 from backend import prompts
 from backend.services.embedding_service import embedding_service
 from backend.services.schedule_service import create_schedule, normalize_schedule_time
@@ -76,14 +78,16 @@ def _normalize_risk(value, default="none") -> str:
 
 class EmotionalReply:
     """主 LLM 结构化情感输出的统一结果对象（内部使用，不直接暴露给前端）"""
-    __slots__ = ("reply", "emotion", "need", "intensity", "risk_level")
+    __slots__ = ("reply", "emotion", "need", "intensity", "risk_level", "profile_update")
 
-    def __init__(self, reply: str, emotion: str, need: str, intensity: int, risk_level: str):
+    def __init__(self, reply: str, emotion: str, need: str, intensity: int, risk_level: str,
+                 profile_update: Optional[dict] = None):
         self.reply = reply
         self.emotion = emotion
         self.need = need
         self.intensity = intensity
         self.risk_level = risk_level
+        self.profile_update = profile_update
 
 
 def _parse_emotion_data(data: dict, raw: str) -> EmotionalReply:
@@ -91,12 +95,16 @@ def _parse_emotion_data(data: dict, raw: str) -> EmotionalReply:
     reply = data.get("reply")
     if not reply or not str(reply).strip():
         reply = raw  # 解析出 JSON 但 reply 为空时，退回原文兜底
+    profile_update = data.get("profile_update")
+    if not isinstance(profile_update, dict) or not profile_update:
+        profile_update = None
     return EmotionalReply(
         reply=str(reply),
         emotion=_normalize_emotion(data.get("emotion")),
         need=_normalize_need(data.get("need")),
         intensity=_clamp_intensity(data.get("intensity", 1)),
         risk_level=_normalize_risk(data.get("risk_level")),
+        profile_update=profile_update,
     )
 
 
@@ -315,53 +323,6 @@ async def generate_safe_crisis_reply(pet_type: str, pet_name: str) -> str:
     )
 
 
-async def generate_share_daily_message(pet_type: str, pet_name: str) -> str:
-    """生成宠物分享日常的消息"""
-    import random
-    
-    daily_topics = {
-        "hot_dog": [
-            "主人不在的时候，汪汪把玩具球玩了一整天呢！",
-            "今天发现了一个超好玩的蝴蝶，汪汪追了它好久！",
-            "汪汪把最喜欢的狗窝整理了一下，现在超级舒服～",
-            "门口的小松鼠又来了，汪汪和它聊了一会儿天！",
-            "汪汪今天学会了新技能！主人回来要夸夸汪汪哦！"
-        ],
-        "cold_cat": [
-            "......今天阳光很好，本喵晒了一会儿太阳。",
-            "哼，那个逗猫棒被本喵成功捕获了。（才不是开心）",
-            "邻居的猫又来挑衅了，本喵懒得理它。",
-            "本喵今天睡了一个很舒服的午觉......才不是在等你。",
-            "窗外的鸟好吵，本喵决定无视它们。"
-        ],
-        "mouse": [
-            "鼠鼠今天找到了一颗超级好吃的瓜子！",
-            "鼠鼠把窝重新装修了一下，现在暖暖的～",
-            "鼠鼠鼓起勇气去探索了一下厨房，发现了好多新奇的东西！",
-            "今天鼠鼠学会了新舞步，想跳给主人看！",
-            "鼠鼠偷偷藏了一些好吃的，想和主人一起分享～"
-        ]
-    }
-    
-    topic = random.choice(daily_topics.get(pet_type, daily_topics["hot_dog"]))
-    
-    # 用 LLM 生成更自然的表达
-    llm_content = await llm_service.generate_proactive_message(
-        pet_type, pet_name, f"分享日常生活：{topic}"
-    )
-    
-    if llm_content:
-        return llm_content
-    
-    # Fallback：直接返回话题
-    prefixes = {
-        "hot_dog": "汪汪！告诉主人一个好消息！",
-        "cold_cat": "......有个事情。",
-        "mouse": "鼠鼠有话想和主人说......"
-    }
-    return f"{prefixes.get(pet_type, '')}{topic}"
-
-
 async def build_context(session_id: str, pet_type: str, custom_pet_id: str = None) -> dict:
     async with get_db() as db:
         cursor = await db.execute(
@@ -524,20 +485,7 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         pet_type = session_dict["pet_type"]
         custom_pet_id = session_dict.get("custom_pet_id")
 
-        # 获取宠物名称（用于懒说话分支）
-        pet_prompts = {
-            "hot_dog": prompts.hot_dog,
-            "cold_cat": prompts.cold_cat,
-            "mouse": prompts.mouse
-        }
-        pet_info = pet_prompts.get(pet_type)
-        pet_name = pet_info.PET_NAME if pet_info else "小可爱"
-        
-        # 自定义宠物使用自定义名称（带 user_id 归属校验）
-        if pet_type == "custom" and custom_pet_id:
-            custom_pet_info = await get_custom_pet_info(custom_pet_id, request.state.user_id)
-            if custom_pet_info:
-                pet_name = custom_pet_info["pet_name"]
+        pet_name, pet_context = await get_reminder_identity(db, session_dict)
 
         if session_dict["pet_status"] == "hiding":
             status_until = session_dict.get("status_until")
@@ -563,7 +511,7 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
                 # 懒说话时仍需检查是否需要分享日常
                 daily_share = None
                 if random.random() < 0.33:
-                    daily_content = await generate_share_daily_message(pet_type, pet_name)
+                    daily_content = await generate_share_daily_message(pet_type, pet_name, pet_context)
                     await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
                     daily_share = {"role": "assistant", "content": daily_content}
                     logger.debug("Daily share triggered (cold_cat lazy): %s", daily_content)
@@ -715,6 +663,7 @@ Agent 需要自主从用户消息中识别位置信息：
 - need：用户此刻更可能需要的情感支持方式（陪伴/倾诉/认可/鼓励/建议/安抚/转移注意力/庆祝/梳理/危机支持/不确定）。
 - intensity：情绪强度 1-5，1 轻微、3 中等、5 极强。
 - risk_level：安全风险等级 none/low/medium/high。当用户表达自伤、自杀、伤害他人、极度绝望时取 high。
+- profile_update（可选字段）：仅当用户本轮【明确陈述】自己居住城市发生变化（如"我搬到上海了"）时，额外输出 "profile_update": {{"region": "城市名"}}；其余情况不要输出该字段，不要根据猜测填写。
 【安全】当 risk_level=high 时，回复必须认真严肃，不开玩笑、不轻描淡写，鼓励用户联系现实中可信任的人或紧急求助，并说明本产品不是专业心理咨询。"""
 
     raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", max_tokens=2000, timeout=90.0)
@@ -750,6 +699,17 @@ Agent 需要自主从用户消息中识别位置信息：
             emotion_intensity = tool_emo.intensity
         if tool_emo.risk_level != "none":
             risk_level = tool_emo.risk_level
+
+    # 主 Agent 声明的画像更新：信任闸门过滤后同步落库并刷新缓存（亚毫秒级），
+    # 保证下一轮对话的 prompt 与工具决策立即使用新值
+    user_profile_updated = False
+    if emo.profile_update:
+        try:
+            user_profile_updated = await memory_service.apply_main_agent_profile_update(
+                session_dict["user_id"], emo.profile_update
+            )
+        except Exception as e:
+            logger.warning("主 Agent 画像更新失败 user_id=%s: %s", session_dict.get("user_id"), e)
 
     # risk_level=high 安全回应策略：在安全规则约束下重新生成回复，
     # 保持宠物人格但优先安全、不开玩笑、引导现实求助、声明非专业服务。
@@ -792,7 +752,6 @@ Agent 需要自主从用户消息中识别位置信息：
         logger.info("Schedule saved: %s", schedule_extracted)
 
     # 后台更新用户画像（使用用户画像总结 Agent，不阻塞响应）
-    user_profile_updated = False
     async def _update_user_profile():
         try:
             existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
@@ -855,13 +814,25 @@ Agent 需要自主从用户消息中识别位置信息：
 
     import random
     if random.random() < 0.33 and session_dict.get("pet_status") != "hiding":
-        daily_content = await generate_share_daily_message(pet_type, pet_name)
+        daily_content = await generate_share_daily_message(pet_type, pet_name, pet_context)
         await memory_service.save_message(session_id, "assistant", daily_content, is_proactive=True)
         daily_share = {"role": "assistant", "content": daily_content}
         logger.debug("Daily share triggered: %s", daily_content)
 
-    # 每 5 轮触发后台情绪趋势分析（零阻塞）
-    if mood_agent.should_trigger(session_id, new_total_chats):
+    # 记录本轮情绪事件（主 Agent 顺手产出，零额外 LLM 成本）。
+    # 同步写入（单行 INSERT，亚毫秒级），确保紧随其后的触发判断能看到本轮信号。
+    await event_service.append_event(
+        session_dict["user_id"], session_id, "emotion_observed",
+        {
+            "emotion": emotion_tag,
+            "need": emotional_need,
+            "intensity": emotion_intensity,
+            "risk_level": risk_level,
+        },
+    )
+
+    # 情绪信号驱动触发后台趋势分析（零阻塞）
+    if await mood_agent.should_trigger(session_dict["user_id"]):
         background_tasks.add_task(
             mood_agent.analyze_mood_tendency,
             user_id=session_dict["user_id"],

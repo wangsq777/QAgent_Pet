@@ -2,7 +2,28 @@ const petImage = document.getElementById('petImage');
 const petButton = document.getElementById('petButton');
 const petBubble = document.getElementById('petBubble');
 const petMood = document.getElementById('petMood');
+const petShell = document.getElementById('petShell');
 const backendHint = document.getElementById('backendHint');
+
+// 五态动画:pet.css 为 pet-shell 的 state-* class 各定义一组纯 CSS 动画,
+// 状态切换=class 变化,动画名随 class 变化天然重启,无需 JS 重启逻辑。
+const PET_STATE_CLASSES = ['state-idle', 'state-happy', 'state-lonely', 'state-sleepy', 'state-studying'];
+
+function resolvePetState(status) {
+  const raw = `${status?.status || ''} ${status?.status_label || ''}`.toLowerCase();
+  if (raw.includes('study')) return 'studying';
+  if (raw.includes('lonely')) return 'lonely';
+  if (raw.includes('sleep')) return 'sleepy';
+  if (raw.includes('happy')) return 'happy';
+  return 'idle';
+}
+
+function applyPetState(status) {
+  const state = resolvePetState(status);
+  for (const name of PET_STATE_CLASSES) {
+    petShell.classList.toggle(name, name === `state-${state}`);
+  }
+}
 
 const BUBBLE_HIDE_MS = 6000;
 const REFRESH_MS = 60 * 1000;
@@ -78,6 +99,7 @@ async function refreshStatus({ allowBubble = false } = {}) {
     currentConfig = await window.desktopAPI.getConfig();
     const status = await window.desktopAPI.getPetStatus();
     petMood.textContent = status?.status_label || '待机';
+    applyPetState(status);
 
     if (currentConfig?.dnd) {
       petBubble.hidden = true;

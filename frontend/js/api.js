@@ -12,12 +12,15 @@ function getUserId() {
 
 /**
  * 构建带 X-User-Id 的公共请求头
+ * 桌面端面板由 preload 注入 __QAGENT_RUNTIME__.apiKey,需同时携带 Bearer 令牌
  * @param {Object} extra - 额外请求头（如 Content-Type）
  * @returns {Object}
  */
 function buildHeaders(extra = {}) {
+    const runtime = window.__QAGENT_RUNTIME__ || {};
     return {
         'X-User-Id': getUserId(),
+        ...(runtime.apiKey ? { 'Authorization': `Bearer ${runtime.apiKey}` } : {}),
         ...extra
     };
 }
@@ -134,6 +137,39 @@ const API = {
             method: 'PUT', headers: buildHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(settings)
         });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '更新主动陪伴设置失败');
+        return await response.json();
+    },
+
+    async outfitAdvice(city = null) {
+        const response = await fetch(`${API_BASE}/weather/outfit-advice`, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(city ? { city } : {})
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || '获取穿衣建议失败');
+        }
+        return await response.json();
+    },
+
+    async proactiveOpened(eventId, claimToken) {
+        const response = await fetch(`${API_BASE}/proactive/events/${eventId}/opened`, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ claim_token: claimToken || null })
+        });
+        if (!response.ok) throw new Error('上报已读失败');
+        return await response.json();
+    },
+
+    async proactiveAction(eventId, action, claimToken) {
+        const response = await fetch(`${API_BASE}/proactive/events/${eventId}/action`, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ action, claim_token: claimToken || null })
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '操作失败');
         return await response.json();
     },
 
@@ -421,6 +457,19 @@ const API = {
         return await response.json();
     },
 
+    async getLearningSessions() {
+        const response = await fetch(`${API_BASE}/learning/sessions`, {
+            headers: buildHeaders()
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || '获取学习记录失败');
+        }
+
+        return await response.json();
+    },
+
     async teachLearningChapter(sessionId, chapterId) {
         const response = await fetch(`${API_BASE}/learning/sessions/${sessionId}/chapters/${chapterId}/teach`, {
             method: 'POST',
@@ -433,6 +482,76 @@ const API = {
         }
 
         return await response.json();
+    },
+
+    /**
+     * 流式生成章节讲解（SSE）。
+     * handlers: onTeacherDelta(text) / onTeacherDone(content) / onPetComment(comment) / onDone(data) / onError(message)
+     * 连接或鉴权失败（!response.ok）时抛 Error；流内业务失败以 error 事件回调。
+     */
+    async streamTeachLearningChapter(sessionId, chapterId, handlers = {}) {
+        const response = await fetch(`${API_BASE}/learning/sessions/${sessionId}/chapters/${chapterId}/teach-stream`, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' })
+        });
+
+        if (!response.ok || !response.body) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || '生成章节讲解失败');
+        }
+
+        const dispatch = (block) => {
+            let event = 'message';
+            const dataLines = [];
+            for (const line of block.split(/\r?\n/)) {
+                if (line.startsWith('event:')) {
+                    event = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                    dataLines.push(line.slice(5).trim());
+                }
+            }
+            if (!dataLines.length) return;
+            let data = {};
+            try {
+                data = JSON.parse(dataLines.join('\n'));
+            } catch (e) {
+                data = {};
+            }
+            switch (event) {
+                case 'teacher_delta':
+                    if (handlers.onTeacherDelta) handlers.onTeacherDelta(data.text || '');
+                    break;
+                case 'teacher_done':
+                    if (handlers.onTeacherDone) handlers.onTeacherDone(data.content || '');
+                    break;
+                case 'pet_comment':
+                    if (handlers.onPetComment) handlers.onPetComment(data.comment || '');
+                    break;
+                case 'done':
+                    if (handlers.onDone) handlers.onDone(data);
+                    break;
+                case 'error':
+                    if (handlers.onError) handlers.onError(data.message || '生成章节讲解失败');
+                    break;
+            }
+        };
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            // SSE 事件以空行分隔，兼容 \n\n 与 \r\n\r\n；末块可能不完整，留到下一轮
+            const blocks = buffer.split(/\r?\n\r?\n/);
+            buffer = blocks.pop();
+            for (const block of blocks) {
+                if (block.trim()) dispatch(block);
+            }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim()) dispatch(buffer);
     },
 
     async completeLearningChapter(sessionId, chapterId) {

@@ -105,6 +105,30 @@
         return window.crypto?.randomUUID?.() || `progress-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
 
+    // 串门入口与聊天页顶栏按钮共用同一套前置条件:至少创建过一只自定义宠物。
+    async function initVisitEntry() {
+        const card = document.getElementById('visit-entry-card');
+        if (!card) return;
+        let hasCustomPets = false;
+        try {
+            const data = await API.listCustomPets();
+            hasCustomPets = (data.pets || []).length >= 1;
+        } catch (error) {
+            hasCustomPets = false;
+        }
+        if (hasCustomPets) {
+            card.addEventListener('click', () => {
+                window.location.href = 'chat.html?ui=4&visit=open';
+            });
+        } else {
+            card.classList.add('disabled');
+            document.getElementById('visit-entry-desc').textContent = '先在广场创建一只自定义宠物，就能邀请它来串门';
+            card.addEventListener('click', () => {
+                window.location.href = 'index.html?ui=4';
+            });
+        }
+    }
+
     async function loadLibrary() {
         const status = document.getElementById('leisure-status');
         const list = document.getElementById('book-list');
@@ -304,6 +328,49 @@
                 feedSelect.value = '';
             });
         }
+        // 摸鱼·B 站本地播放:粘贴链接,在桌宠视频小窗里只播这个视频。
+        const playBiliBtn = document.getElementById('play-bili-video-btn');
+        const biliBar = document.getElementById('bili-video-bar');
+        const biliInput = document.getElementById('bili-video-input');
+        const biliGo = document.getElementById('bili-video-go');
+        if (playBiliBtn && biliBar && biliInput && biliGo && canDesktopFeed()
+            && typeof window.desktopAPI.playBiliVideo === 'function') {
+            playBiliBtn.hidden = false;
+            playBiliBtn.addEventListener('click', () => {
+                biliBar.hidden = !biliBar.hidden;
+                if (!biliBar.hidden) biliInput.focus();
+            });
+            const playBiliNow = async () => {
+                const value = biliInput.value.trim();
+                if (!value) {
+                    biliInput.focus();
+                    return;
+                }
+                const status = document.getElementById('leisure-status');
+                biliGo.disabled = true;
+                if (status) status.textContent = '正在解析链接…';
+                try {
+                    const result = await window.desktopAPI.playBiliVideo(value);
+                    if (result && result.ok) {
+                        biliInput.value = '';
+                        biliBar.hidden = true;
+                        if (status) status.textContent = '已在桌宠视频小窗打开播放器';
+                    } else {
+                        if (status) status.textContent = (result && result.error) || '链接解析失败';
+                    }
+                } catch (error) {
+                    if (status) status.textContent = '播放请求失败：' + error.message;
+                } finally {
+                    biliGo.disabled = false;
+                }
+            };
+            biliGo.addEventListener('click', playBiliNow);
+            biliInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') playBiliNow();
+            });
+        } else if (playBiliBtn) {
+            playBiliBtn.hidden = true;
+        }
         const importBtn = document.getElementById('import-novel-btn');
         const fileInput = document.getElementById('novel-file-input');
         if (importBtn && fileInput) {
@@ -361,6 +428,7 @@
         applyReaderSettings();
         selectTab(new URLSearchParams(location.search).get('tab') || 'learn', false);
         loadLibrary();
+        initVisitEntry();
     }
 
     init();

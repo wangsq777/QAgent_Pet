@@ -112,10 +112,17 @@ class ErrorResponse(BaseModel):
 
 # ============ 主动陪伴 ============
 
+class ClientIdleState(BaseModel):
+    """桌面上报的空闲状态（可选）：连续未空闲分钟数是久坐/喝水/睡觉提醒的依据。"""
+    idle_seconds: int = Field(0, ge=0, le=10**8)
+    active_streak_minutes: int = Field(0, ge=0, le=10**7)
+
+
 class ProactiveClaimRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=64)
     timezone: str = Field("Asia/Shanghai", min_length=1, max_length=64)
     client_id: str = Field(..., min_length=1, max_length=128)
+    idle_state: Optional[ClientIdleState] = None  # 桌面可选上报；缺省时跳过对应事件源
 
 
 class ProactiveActionRequest(BaseModel):
@@ -141,7 +148,25 @@ class ProactiveSettingsRequest(BaseModel):
     emotion_followup_enabled: bool = False
     inactivity_enabled: bool = True
     pet_initiated_enabled: bool = True
+    sedentary_enabled: bool = True
+    hydration_enabled: bool = True
+    sleep_enabled: bool = True
+    learning_enabled: bool = True
+    weather_enabled: bool = True
     privacy_level: Literal["generic", "topic"] = "generic"
+
+
+# ============ 天气穿衣建议 ============
+
+class WeatherOutfitRequest(BaseModel):
+    city: Optional[str] = Field(None, min_length=1, max_length=50)  # 缺省时读用户画像 region
+
+
+class WeatherOutfitResponse(BaseModel):
+    city: str
+    date: str  # 预报目标日（明天），本地日期
+    weather: Dict[str, Any]
+    advice: str
 
 
 class ScheduleCreateRequest(BaseModel):

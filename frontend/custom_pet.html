@@ -356,28 +356,49 @@
             document.getElementById('previewPetName').textContent = name;
             document.getElementById('previewPetTypeLabel').textContent = `${typeNames[selectedPetType]} · ${selectedTags.length ? selectedTags.join(' / ') : '等待补充性格细节'}`;
 
-            let preview = `<strong>${name}</strong> 以 ${typeNames[selectedPetType]} 的形象出现。`;
+            const previewContent = document.getElementById('previewContent');
+            previewContent.replaceChildren();
+
+            const appendText = (text) => previewContent.appendChild(document.createTextNode(text));
+            const appendStrong = (text) => {
+                const strong = document.createElement('strong');
+                strong.textContent = text;
+                previewContent.appendChild(strong);
+            };
+            const appendBr = () => previewContent.appendChild(document.createElement('br'));
+
+            if (!selectedTags.length && !catchphrase && !habits) {
+                previewContent.textContent = '填写左侧信息后，这里会生成宠物的性格预览和说话氛围。';
+                return;
+            }
+
+            appendStrong(name);
+            appendText(` 以 ${typeNames[selectedPetType]} 的形象出现。`);
 
             if (selectedTags.length > 0) {
-                preview += '<br><br><strong>核心性格</strong><br>';
+                appendBr(); appendBr();
+                appendStrong('核心性格');
+                appendBr();
                 selectedTags.forEach(tag => {
-                    preview += `• ${tag}：${tagDescriptions[tag]}<br>`;
+                    appendText(`• ${tag}：${tagDescriptions[tag]}`);
+                    appendBr();
                 });
             }
 
             if (catchphrase) {
-                preview += `<br><strong>口头禅</strong><br>“${catchphrase}”<br>`;
+                appendBr();
+                appendStrong('口头禅');
+                appendBr();
+                appendText(`“${catchphrase}”`);
+                appendBr();
             }
 
             if (habits) {
-                preview += `<br><strong>习惯设定</strong><br>${habits}`;
+                appendBr();
+                appendStrong('习惯设定');
+                appendBr();
+                appendText(habits);
             }
-
-            if (!selectedTags.length && !catchphrase && !habits) {
-                preview = '填写左侧信息后，这里会生成宠物的性格预览和说话氛围。';
-            }
-
-            document.getElementById('previewContent').innerHTML = preview;
         }
 
         document.getElementById('petName').addEventListener('input', updatePreview);

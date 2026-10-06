@@ -101,6 +101,36 @@
     opacity: 0.5;
 }
 
+.proactive-options {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line-soft);
+}
+
+.proactive-option-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.setting-select {
+    min-height: 38px;
+    padding: 0 12px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line-soft);
+    background: var(--bg-card-alt);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+}
+
 @media (max-width: 860px) {
     .settings-grid {
         grid-template-columns: 1fr;

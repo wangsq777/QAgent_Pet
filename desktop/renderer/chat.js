@@ -129,6 +129,25 @@ window.desktopAPI.onProactiveEvent(async (event) => {
     });
     actions.appendChild(button);
   });
+  // 天气事件：消息下加「看看怎么穿」，点击就地渲染次日穿衣建议（400 缺城市时展示后端提示）
+  if (event.message_context?.kind === 'weather_outfit') {
+    const outfitButton = document.createElement('button');
+    outfitButton.type = 'button'; outfitButton.textContent = '看看怎么穿';
+    outfitButton.addEventListener('click', async () => {
+      outfitButton.disabled = true;
+      try {
+        const advice = await window.desktopAPI.outfitAdvice(event.message_context.city || '');
+        const w = advice.weather || {};
+        const precip = w.precip_probability ? `，降水概率${w.precip_probability}%` : '';
+        appendMessage('assistant', `明天${advice.city} ${w.text || ''}，${w.temp_min}~${w.temp_max}°C${precip}。${advice.advice}`);
+        outfitButton.remove();
+      } catch (error) {
+        outfitButton.disabled = false;
+        appendMessage('assistant', error.message || '穿衣建议查询失败');
+      }
+    });
+    actions.appendChild(outfitButton);
+  }
   messagesEl.appendChild(actions);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 });

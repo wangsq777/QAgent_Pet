@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>陪我学 · 宠物源码导读 - QAgent Pet</title>
     <link rel="stylesheet" href="css/shell.css?v=3">
-    <link rel="stylesheet" href="css/learn.css?v=2">
+    <link rel="stylesheet" href="css/learn.css?v=3">
 </head>
 <body>
     <div class="learn-container">
@@ -47,6 +47,10 @@
                         <button id="analyze-btn" class="primary-btn">分析项目</button>
                     </div>
                     <p class="input-hint">仅支持 github.com 公开仓库，暂不支持私有仓库和 Token。</p>
+                    <div id="history-section" class="history-section" style="display:none;">
+                        <h3>继续学习</h3>
+                        <div id="history-list" class="history-list"></div>
+                    </div>
                 </section>
 
                 <!-- 状态2：分析中 -->
@@ -120,9 +124,9 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <script src="js/api.js?v=3"></script>
+    <script src="js/api.js?v=4"></script>
     <script src="js/shell.js?v=4"></script>
-    <script src="js/learn.js?v=2"></script>
+    <script src="js/learn.js?v=3"></script>
     <script>
         initAppShell('want');
     </script>

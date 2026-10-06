@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 MAX_CHAPTER_CHARS = 50000
 MAX_CHAPTERS = 2000
+# EPUB 解压上限：压缩包 20MB 解压后可能膨胀数十倍（zip bomb），按总解压字节数兜底
+MAX_EPUB_DECOMPRESSED_BYTES = 200 * 1024 * 1024
 SUPPORTED_FORMATS = ("txt", "epub", "docx")
 
 
@@ -174,13 +176,23 @@ def parse_epub(raw: bytes, *, filename: str = "") -> ParsedBook:
     except zipfile.BadZipFile as exc:
         raise NovelImportError("EPUB 文件损坏") from exc
     try:
-        container = ET.fromstring(zf.read("META-INF/container.xml"))
+        total_decompressed = sum(info.file_size for info in zf.infolist())
+        if total_decompressed > MAX_EPUB_DECOMPRESSED_BYTES:
+            raise NovelImportError("EPUB 解压后体积过大，疑似压缩炸弹")
+
+        def read_entry(name: str) -> bytes:
+            info = zf.getinfo(name)
+            if info.file_size > MAX_EPUB_DECOMPRESSED_BYTES:
+                raise NovelImportError("EPUB 内部文件体积异常")
+            return zf.read(name)
+
+        container = ET.fromstring(read_entry("META-INF/container.xml"))
         rootfile = container.find(".//c:rootfile", _CONTAINER_NS)
         if rootfile is None or not rootfile.get("full-path"):
             raise NovelImportError("EPUB 缺少 OPF 入口")
         opf_path = rootfile.get("full-path")
         opf_dir = opf_path.rsplit("/", 1)[0] + "/" if "/" in opf_path else ""
-        opf = ET.fromstring(zf.read(opf_path))
+        opf = ET.fromstring(read_entry(opf_path))
 
         title_node = opf.find(".//dc:title", _OPF_NS)
         creator_node = opf.find(".//dc:creator", _OPF_NS)
@@ -196,7 +208,7 @@ def parse_epub(raw: bytes, *, filename: str = "") -> ParsedBook:
             if not href:
                 continue
             try:
-                xhtml = zf.read(href)
+                xhtml = read_entry(href)
             except KeyError:
                 continue
             body = _strip_html(xhtml)

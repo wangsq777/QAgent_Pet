@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>你想要的 - QAgent Pet</title>
     <link rel="stylesheet" href="css/shell.css?v=3">
-    <link rel="stylesheet" href="css/want.css?v=3">
+    <link rel="stylesheet" href="css/want.css?v=5">
 </head>
 <body>
     <main class="want-page">
@@ -61,17 +61,32 @@
                 <div class="panel-heading">
                     <div><span class="section-label">短暂休息</span><h2>随手翻一点，停在哪里都算数</h2></div>
                     <div class="panel-heading-actions">
-                        <select id="feed-channel-select" class="ghost-command" title="在桌宠视频小窗里刷视频（需桌面端）" hidden>
-                            <option value="" selected disabled>📺 桌面刷视频…</option>
+                        <select id="feed-channel-select" class="ghost-command" title="在桌宠视频小窗里刷一刷（需桌面端）" hidden>
+                            <option value="" selected disabled>📺 桌面刷一刷…</option>
                             <option value="bilibili">B站</option>
                             <option value="xiaohongshu">小红书</option>
                             <option value="douyin">抖音</option>
+                            <option value="kuaishou">快手</option>
+                            <option value="taobao">淘宝</option>
                         </select>
+                        <button id="play-bili-video-btn" class="ghost-command" type="button" title="粘贴 B 站链接，在桌宠视频小窗里只播这个视频（需桌面端）" hidden>▶ 播放 B 站链接</button>
                         <button id="import-novel-btn" class="ghost-command" type="button" title="导入 TXT / EPUB / DOCX 小说">📥 导入小说</button>
                         <span id="leisure-status" class="panel-status">正在加载…</span>
                     </div>
                 </div>
+                <div id="bili-video-bar" class="bili-video-bar" hidden>
+                    <input id="bili-video-input" type="text" placeholder="粘贴 B 站视频链接或 BV / av 号，可带 ?p= 分P，支持 b23.tv 短链">
+                    <button id="bili-video-go" class="primary-command" type="button">播放</button>
+                </div>
                 <input type="file" id="novel-file-input" accept=".txt,.epub,.docx" hidden>
+                <button id="visit-entry-card" class="visit-entry-card" type="button">
+                    <span class="visit-entry-icon" aria-hidden="true">🐾</span>
+                    <span class="visit-entry-text">
+                        <strong>宠物串门</strong>
+                        <small id="visit-entry-desc">邀请另一只宠物来家里做客，看它们能聊出什么火花</small>
+                    </span>
+                    <span class="visit-entry-arrow" aria-hidden="true">›</span>
+                </button>
                 <div id="book-list" class="book-list" aria-live="polite"></div>
             </div>
 
@@ -121,6 +136,6 @@
 
     <script src="js/api.js?v=4"></script>
     <script src="js/shell.js?v=4"></script>
-    <script src="js/want.js?v=2"></script>
+    <script src="js/want.js?v=4"></script>
 </body>
 </html>
