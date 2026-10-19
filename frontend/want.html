@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>你想要的 - QAgent Pet</title>
     <link rel="stylesheet" href="css/shell.css?v=3">
-    <link rel="stylesheet" href="css/want.css?v=5">
+    <link rel="stylesheet" href="css/want.css?v=11">
 </head>
 <body>
     <main class="want-page">
@@ -56,86 +56,116 @@
             </div>
         </section>
 
-        <section id="leisure-panel" class="want-panel" role="tabpanel" aria-labelledby="leisure-tab" hidden>
-            <div id="leisure-library">
-                <div class="panel-heading">
-                    <div><span class="section-label">短暂休息</span><h2>随手翻一点，停在哪里都算数</h2></div>
-                    <div class="panel-heading-actions">
-                        <select id="feed-channel-select" class="ghost-command" title="在桌宠视频小窗里刷一刷（需桌面端）" hidden>
-                            <option value="" selected disabled>📺 桌面刷一刷…</option>
-                            <option value="bilibili">B站</option>
-                            <option value="xiaohongshu">小红书</option>
-                            <option value="douyin">抖音</option>
-                            <option value="kuaishou">快手</option>
-                            <option value="taobao">淘宝</option>
-                        </select>
-                        <button id="play-bili-video-btn" class="ghost-command" type="button" title="粘贴 B 站链接，在桌宠视频小窗里只播这个视频（需桌面端）" hidden>▶ 播放 B 站链接</button>
-                        <button id="import-novel-btn" class="ghost-command" type="button" title="导入 TXT / EPUB / DOCX 小说">📥 导入小说</button>
-                        <span id="leisure-status" class="panel-status">正在加载…</span>
-                    </div>
-                </div>
-                <div id="bili-video-bar" class="bili-video-bar" hidden>
-                    <input id="bili-video-input" type="text" placeholder="粘贴 B 站视频链接或 BV / av 号，可带 ?p= 分P，支持 b23.tv 短链">
-                    <button id="bili-video-go" class="primary-command" type="button">播放</button>
-                </div>
-                <input type="file" id="novel-file-input" accept=".txt,.epub,.docx" hidden>
-                <button id="visit-entry-card" class="visit-entry-card" type="button">
-                    <span class="visit-entry-icon" aria-hidden="true">🐾</span>
-                    <span class="visit-entry-text">
-                        <strong>宠物串门</strong>
-                        <small id="visit-entry-desc">邀请另一只宠物来家里做客，看它们能聊出什么火花</small>
-                    </span>
-                    <span class="visit-entry-arrow" aria-hidden="true">›</span>
-                </button>
-                <div id="book-list" class="book-list" aria-live="polite"></div>
-            </div>
-
-            <article id="novel-reader" class="novel-reader" hidden>
-                <header class="reader-toolbar">
-                    <button id="close-reader" class="icon-command" type="button" title="返回书架" aria-label="返回书架">←</button>
-                    <div><small id="reader-book-title">小说</small><strong id="reader-chapter-title">章节</strong></div>
-                    <span id="reader-progress">1 / 1</span>
-                    <button id="desktop-read-btn" class="ghost-command" type="button" title="在桌宠隐蔽阅读窗中继续读" hidden>🖥 桌面阅读</button>
+        <section id="leisure-panel" class="want-panel fake-workspace" role="tabpanel" aria-labelledby="leisure-tab" hidden>
+            <aside class="workspace-sidebar" aria-label="工作区导航">
+                <div class="workspace-brand"><span class="workspace-mark" aria-hidden="true">✳</span><strong>Codex</strong></div>
+                <button id="workspace-home" class="workspace-new" type="button" title="回到会话" aria-label="回到会话">＋ <span>新建任务</span></button>
+                <div class="workspace-group-label">工作区</div>
+                <button id="workspace-library" class="workspace-nav-item active" type="button">▤ <span>项目资料</span></button>
+                <div class="workspace-group-label">最近打开</div>
+                <div id="recent-book-list" class="workspace-recent"></div>
+                <a class="workspace-back" href="want.html?ui=4&tab=learn" title="返回陪学">← <span>返回陪学</span></a>
+            </aside>
+            <div class="workspace-main">
+                <header class="workspace-header">
+                    <div><span class="workspace-header-label">本地工作区</span><strong id="workspace-title">项目资料整理</strong></div>
+                    <span class="workspace-header-status"><span aria-hidden="true"></span> 已就绪</span>
                 </header>
-                <div class="reader-controls" aria-label="阅读设置">
-                    <label class="chapter-control">目录
-                        <select id="chapter-select" aria-label="选择章节"></select>
-                    </label>
-                    <label>字号
-                        <select id="font-size-select" aria-label="阅读字号">
-                            <option value="16">小</option>
-                            <option value="18">标准</option>
-                            <option value="20">大</option>
-                            <option value="22">特大</option>
-                        </select>
-                    </label>
-                    <label>行距
-                        <select id="line-height-select" aria-label="阅读行距">
-                            <option value="1.65">紧凑</option>
-                            <option value="1.85">舒适</option>
-                            <option value="2.05">宽松</option>
-                        </select>
-                    </label>
-                    <div class="theme-control">
-                        <span>主题</span>
-                        <div class="theme-options" role="group" aria-label="阅读主题">
-                            <button type="button" data-reader-theme="light">浅色</button>
-                            <button type="button" data-reader-theme="paper">纸张</button>
-                            <button type="button" data-reader-theme="dark">深色</button>
+                <div class="workspace-messages" id="workspace-messages" aria-live="polite">
+                    <article class="workspace-message workspace-user"><div class="workspace-bubble">帮我整理一下当前项目资料</div></article>
+                    <article id="leisure-library" class="workspace-message workspace-assistant">
+                        <div class="workspace-avatar" aria-hidden="true">✳</div>
+                        <div class="workspace-response">
+                            <div class="workspace-message-heading">Codex</div>
+                            <div class="panel-heading">
+                                <div><h2>可查看的资料</h2><span id="leisure-status" class="panel-status">正在加载…</span></div>
+                                <div class="panel-heading-actions">
+                                    <select id="feed-channel-select" class="ghost-command" title="在当前 Codex 回复中打开网页" aria-label="选择摸鱼网页" hidden>
+                                        <option value="" selected disabled>打开网页…</option>
+                                        <option value="bilibili">B站</option>
+                                        <option value="xiaohongshu">小红书</option>
+                                        <option value="douyin">抖音</option>
+                                        <option value="kuaishou">快手</option>
+                                        <option value="taobao">淘宝</option>
+                                    </select>
+                                    <button id="play-bili-video-btn" class="ghost-command" type="button" title="在当前 Codex 回复中嵌入 B 站视频" hidden>打开链接</button>
+                                    <button id="import-novel-btn" class="ghost-command" type="button" title="导入 TXT / EPUB / DOCX 文件">导入资料</button>
+                                </div>
+                            </div>
+                            <div id="bili-video-bar" class="bili-video-bar" hidden>
+                                <input id="bili-video-input" type="text" placeholder="粘贴 B 站视频链接或 BV / av 号，可带 ?p= 分P，支持 b23.tv 短链">
+                                <button id="bili-video-go" class="primary-command" type="button">播放</button>
+                            </div>
+                            <input type="file" id="novel-file-input" accept=".txt,.epub,.docx" hidden>
+                            <button id="visit-entry-card" class="visit-entry-card" type="button">
+                                <span class="visit-entry-icon" aria-hidden="true">🐾</span>
+                                <span class="visit-entry-text">
+                                    <strong>宠物串门</strong>
+                                    <small id="visit-entry-desc">邀请另一只宠物来家里做客，看它们能聊出什么火花</small>
+                                </span>
+                                <span class="visit-entry-arrow" aria-hidden="true">›</span>
+                            </button>
+                            <div id="book-list" class="book-list" aria-live="polite"></div>
                         </div>
-                    </div>
+                    </article>
+
+                    <article id="novel-reader" class="workspace-message workspace-assistant novel-reader" hidden>
+                        <div class="workspace-avatar" aria-hidden="true">✳</div>
+                        <div class="workspace-response">
+                            <div class="workspace-message-heading">Codex</div>
+                            <header class="reader-toolbar">
+                                <button id="close-reader" class="icon-command" type="button" title="返回资料列表" aria-label="返回资料列表">←</button>
+                                <div><small id="reader-book-title">小说</small><strong id="reader-chapter-title">章节</strong></div>
+                                <span id="reader-progress">1 / 1</span>
+                                <button id="desktop-read-btn" class="ghost-command" type="button" title="在桌宠隐蔽阅读窗中继续读" hidden>🖥 桌面阅读</button>
+                            </header>
+                            <div class="reader-controls" aria-label="阅读设置">
+                                <label class="chapter-control">目录
+                                    <select id="chapter-select" aria-label="选择章节"></select>
+                                </label>
+                                <label>字号
+                                    <select id="font-size-select" aria-label="阅读字号">
+                                        <option value="16">小</option>
+                                        <option value="18">标准</option>
+                                        <option value="20">大</option>
+                                        <option value="22">特大</option>
+                                    </select>
+                                </label>
+                                <label>行距
+                                    <select id="line-height-select" aria-label="阅读行距">
+                                        <option value="1.65">紧凑</option>
+                                        <option value="1.85">舒适</option>
+                                        <option value="2.05">宽松</option>
+                                    </select>
+                                </label>
+                                <div class="theme-control">
+                                    <span>主题</span>
+                                    <div class="theme-options" role="group" aria-label="阅读主题">
+                                        <button type="button" data-reader-theme="light">浅色</button>
+                                        <button type="button" data-reader-theme="paper">纸张</button>
+                                        <button type="button" data-reader-theme="dark">深色</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="reader-content" class="reader-content"></div>
+                            <footer class="reader-actions">
+                                <button id="previous-chapter" type="button">上一章</button>
+                                <button id="next-chapter" class="primary-command" type="button">下一章</button>
+                            </footer>
+                        </div>
+                    </article>
                 </div>
-                <div id="reader-content" class="reader-content"></div>
-                <footer class="reader-actions">
-                    <button id="previous-chapter" type="button">上一章</button>
-                    <button id="next-chapter" class="primary-command" type="button">下一章</button>
-                </footer>
-            </article>
+                <form id="workspace-composer" class="workspace-composer">
+                    <label for="workspace-query" class="visually-hidden">检索资料</label>
+                    <textarea id="workspace-query" rows="2" placeholder="检索资料..." aria-label="检索资料"></textarea>
+                    <div class="workspace-composer-footer"><span>本地工作区</span><button type="submit" title="发送检索" aria-label="发送检索">↑</button></div>
+                </form>
+            </div>
         </section>
     </main>
 
     <script src="js/api.js?v=4"></script>
     <script src="js/shell.js?v=4"></script>
-    <script src="js/want.js?v=4"></script>
+    <script src="js/want.js?v=12"></script>
 </body>
 </html>

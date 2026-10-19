@@ -1,4 +1,5 @@
 import uuid
+import json
 import re
 from datetime import datetime, timedelta
 from typing import Optional
@@ -85,7 +86,19 @@ async def create_session(body: SessionCreateRequest, request: Request):
     if pet_type not in valid_pet_types:
         raise HTTPException(status_code=400, detail="Invalid pet type")
 
+    if pet_type == "custom" and not custom_pet_id:
+        raise HTTPException(status_code=400, detail="custom_pet_id is required for custom pets")
+
     async with get_db() as db:
+        custom_pet = None
+        if pet_type == "custom":
+            cursor = await db.execute(
+                "SELECT pet_name, pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id=? AND user_id=?",
+                (custom_pet_id, user_id),
+            )
+            custom_pet = await cursor.fetchone()
+            if custom_pet is None:
+                raise HTTPException(status_code=404, detail="Custom pet not found")
         # 查找该用户是否已有该宠物的 session（自定义宠物需要匹配 custom_pet_id）
         if pet_type == "custom" and custom_pet_id:
             cursor = await db.execute(
@@ -151,38 +164,17 @@ async def create_session(body: SessionCreateRequest, request: Request):
         "mouse": prompts.mouse
     }
 
-    # 自定义宠物使用不同的欢迎语逻辑
-    if pet_type == "custom" and custom_pet_id:
+    # 已在创建 session 前验证自定义宠物及其归属。
+    if pet_type == "custom":
         from backend.prompts.custom_pet import generate_welcome_messages
-        from backend.routers.chat import get_custom_pet_info
 
-        # 从数据库获取自定义宠物配置（带 user_id 归属校验，防止越权读取他人宠物）
-        custom_pet_info = await get_custom_pet_info(custom_pet_id, user_id)
-        if custom_pet_info:
-            pet_name = custom_pet_info["pet_name"]
-            # 需要更多字段来生成欢迎语，查完整记录（同样带 user_id 归属校验）
-            async with get_db() as db:
-                cursor = await db.execute(
-                    "SELECT pet_type, personality_tags, catchphrase FROM custom_pets WHERE pet_id = ? AND user_id = ?",
-                    (custom_pet_id, user_id)
-                )
-                row = await cursor.fetchone()
-            if row:
-                row_dict = dict(row)
-                import json
-                personality_tags = json.loads(row_dict["personality_tags"])
-                welcome_messages = await generate_welcome_messages(
-                    pet_name=pet_name,
-                    pet_type=row_dict["pet_type"],
-                    personality_tags=personality_tags,
-                    catchphrase=row_dict["catchphrase"]
-                )
-                welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是{pet_name}！"
-            else:
-                welcome_content = f"你好！我是{pet_name}！"
-        else:
-            pet_name = body.nickname or "小可爱"
-            welcome_content = f"你好！我是你的专属宠物{pet_name}！"
+        welcome_messages = await generate_welcome_messages(
+            pet_name=custom_pet["pet_name"],
+            pet_type=custom_pet["pet_type"],
+            personality_tags=json.loads(custom_pet["personality_tags"]),
+            catchphrase=custom_pet["catchphrase"],
+        )
+        welcome_content = welcome_messages[0] if welcome_messages else f"你好！我是{custom_pet['pet_name']}！"
     else:
         pet_info = pet_prompts.get(pet_type)
         welcome_content = await llm_service.generate_welcome_message(

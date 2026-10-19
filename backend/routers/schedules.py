@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from backend.database import get_db
 from backend.schemas import ScheduleCandidateConfirmRequest, ScheduleCreateRequest, ScheduleUpdateRequest
 from backend.services.schedule_service import create_schedule, normalize_schedule_time
-from backend.services.time_service import utc_iso
+from backend.services.time_service import ensure_utc, utc_iso
 
 router = APIRouter(prefix="/api/sessions/{session_id}", tags=["schedules"])
 
@@ -48,8 +48,14 @@ async def update_schedule(session_id: str, schedule_id: str, body: ScheduleUpdat
         if not schedule:
             raise HTTPException(status_code=404, detail="Schedule not found")
         values = body.model_dump(exclude_unset=True)
+        for field in ("content", "status", "reminder_offset_minutes"):
+            if field in values and values[field] is None:
+                raise HTTPException(status_code=422, detail=f"{field} cannot be null")
         if "scheduled_at" in values or "scheduled_at_utc" in values:
-            values["scheduled_at_utc"] = utc_iso(normalize_schedule_time(scheduled_at=values.pop("scheduled_at", None), scheduled_at_utc=values.pop("scheduled_at_utc", None), timezone=values.get("timezone") or schedule["timezone"] or "Asia/Shanghai"))
+            try:
+                values["scheduled_at_utc"] = utc_iso(normalize_schedule_time(scheduled_at=values.pop("scheduled_at", None), scheduled_at_utc=values.pop("scheduled_at_utc", None), timezone=values.get("timezone") or schedule["timezone"] or "Asia/Shanghai"))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             values["scheduled_time"] = values["scheduled_at_utc"]
         if "timezone" in values and values["timezone"] is None:
             values.pop("timezone")
@@ -66,10 +72,25 @@ async def update_schedule(session_id: str, schedule_id: str, body: ScheduleUpdat
             assignments.append("is_triggered=?")
         params.extend([schedule_id, session_id])
         await db.execute(f"UPDATE schedules SET {', '.join(assignments)} WHERE schedule_id=? AND session_id=?", params)
-        if "status" in values and values["status"] == "cancelled":
-            await db.execute("UPDATE proactive_events SET status='cancelled', updated_at_utc=? WHERE source_type='schedule' AND source_ref_id=? AND status NOT IN ('completed','cancelled','expired')", (utc_iso(), schedule_id))
-        elif "scheduled_at_utc" in values:
-            await db.execute("UPDATE proactive_events SET scheduled_at_utc=?, status=CASE WHEN status='cancelled' THEN status ELSE 'pending' END, updated_at_utc=? WHERE source_type='schedule' AND source_ref_id=?", (values["scheduled_at_utc"], utc_iso(), schedule_id))
+        effective_status = values.get("status", schedule["status"])
+        if effective_status in {"completed", "cancelled"}:
+            await db.execute(
+                """UPDATE proactive_events SET status='cancelled', claim_token=NULL,
+                   claim_expires_at_utc=NULL, updated_at_utc=?
+                   WHERE source_type='schedule' AND source_ref_id=?
+                   AND status IN ('pending','snoozed','claimed','delivered','opened')""",
+                (utc_iso(), schedule_id),
+            )
+        elif effective_status == "pending" and ("scheduled_at_utc" in values or "reminder_offset_minutes" in values):
+            appointment = ensure_utc(values.get("scheduled_at_utc") or schedule["scheduled_at_utc"] or schedule["scheduled_time"])
+            offset = values.get("reminder_offset_minutes", schedule["reminder_offset_minutes"] or 0)
+            await db.execute(
+                """UPDATE proactive_events SET scheduled_at_utc=?, expires_at_utc=?,
+                   status='pending', claim_token=NULL, claim_expires_at_utc=NULL, updated_at_utc=?
+                   WHERE source_type='schedule' AND source_ref_id=?
+                   AND status IN ('pending','snoozed','claimed')""",
+                (utc_iso(appointment - timedelta(minutes=offset)), utc_iso(appointment + timedelta(hours=2)), utc_iso(), schedule_id),
+            )
         await db.commit()
         cursor = await db.execute("SELECT * FROM schedules WHERE schedule_id=?", (schedule_id,))
         return dict(await cursor.fetchone())

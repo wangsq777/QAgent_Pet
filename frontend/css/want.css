@@ -129,3 +129,108 @@ select.ghost-command:hover { border-color: var(--want-teal); }
     .theme-control { grid-column: 1 / -1; }
     .reader-content { min-height: 360px; padding: 32px 22px; font-size: 17px; }
 }
+
+/* The leisure tab is an independent, work-like conversation surface. */
+body.leisure-mode { padding: 0; background: #fafaf9; color: #262624; }
+body.leisure-mode .app-rail, body.leisure-mode .app-topbar,
+body.leisure-mode .want-header, body.leisure-mode .want-tabs { display: none; }
+body.leisure-mode .want-page { width: 100%; max-width: none; margin: 0; padding: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.fake-workspace { display: grid; grid-template-columns: 244px minmax(0, 1fr); height: 100vh; height: 100dvh; min-height: 420px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+.fake-workspace button, .fake-workspace select, .fake-workspace textarea { font: inherit; }
+.workspace-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 22px 12px 14px; border-right: 1px solid #e7e7e5; background: #f3f3f1; }
+.workspace-brand { display: flex; align-items: center; gap: 10px; padding: 0 13px 28px; font-size: 17px; font-weight: 700; color: #252523; }
+.workspace-mark, .workspace-avatar { display: grid; place-items: center; flex: none; width: 27px; height: 27px; border: 1px solid #333331; border-radius: 50%; font-size: 19px; line-height: 1; }
+.workspace-new, .workspace-nav-item, .workspace-recent button, .workspace-back { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 6px 12px; border: 0; border-radius: 6px; background: transparent; color: #4c4c49; text-align: left; text-decoration: none; font-size: 13px; cursor: pointer; }
+.workspace-new:hover, .workspace-nav-item:hover, .workspace-recent button:hover, .workspace-back:hover, .workspace-nav-item.active { background: #e8e8e5; color: #222220; }
+.workspace-new { margin-bottom: 25px; font-weight: 600; }
+.workspace-group-label { margin: 0 12px 7px; color: #8b8b86; font-size: 11px; }
+.workspace-nav-item { margin-bottom: 22px; }
+.workspace-recent { min-height: 36px; overflow: auto; }
+.workspace-recent button { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-back { margin-top: auto; border-top: 1px solid #e2e2e0; border-radius: 0; padding-top: 15px; }
+.workspace-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fff; }
+.workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex: none; height: 64px; padding: 0 30px; border-bottom: 1px solid #ebebe9; }
+.workspace-header > div { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.workspace-header-label { color: #898985; font-size: 12px; white-space: nowrap; }
+.workspace-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; }
+.workspace-header-status { display: flex; align-items: center; gap: 7px; color: #797973; font-size: 11px; white-space: nowrap; }
+.workspace-header-status span { width: 7px; height: 7px; border-radius: 50%; background: #288474; }
+.workspace-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 30px max(24px, calc((100% - 840px) / 2)) 20px; scroll-behavior: smooth; }
+.workspace-message { display: flex; gap: 12px; margin-bottom: 30px; min-width: 0; }
+.workspace-user { justify-content: flex-end; }
+.workspace-bubble { max-width: min(82%, 550px); padding: 11px 15px; border-radius: 8px; background: #f1f1ef; color: #333330; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.workspace-avatar { width: 25px; height: 25px; margin-top: 1px; font-size: 17px; }
+.workspace-response { flex: 1; min-width: 0; }
+.workspace-message-heading { margin: 4px 0 13px; font-size: 13px; font-weight: 700; }
+.fake-workspace .panel-heading { align-items: center; margin-bottom: 13px; }
+.fake-workspace .panel-heading h2 { margin: 0 0 2px; font-size: 14px; font-weight: 650; }
+.fake-workspace .panel-heading-actions { gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.fake-workspace .panel-status { color: #898985; font-size: 11px; }
+.fake-workspace .ghost-command { min-height: 30px; padding: 4px 9px; border: 1px solid #e1e1df; border-radius: 5px; background: #fff; color: #50504d; font-size: 11px; font-weight: 500; }
+.fake-workspace select.ghost-command { padding-right: 25px; }
+.fake-workspace .bili-video-bar { margin: 8px 0 14px; }
+.fake-workspace .bili-video-bar input { border-radius: 6px; }
+.fake-workspace .primary-command { min-height: 34px; border-radius: 5px; background: #292a28; font-size: 12px; }
+.fake-workspace .visit-entry-card { margin: 12px 0 8px; padding: 10px 0; border: 0; border-top: 1px solid #ececea; border-radius: 0; background: transparent; }
+.fake-workspace .visit-entry-icon { width: 28px; height: 28px; background: #e8f0ed; font-size: 15px; }
+.fake-workspace .visit-entry-text strong { font-size: 12px; }
+.fake-workspace .visit-entry-text small { font-size: 11px; }
+.fake-workspace .book-list { display: block; border-top: 1px solid #eaeae8; }
+.fake-workspace .book-item { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; min-height: 0; padding: 15px 2px; border: 0; border-bottom: 1px solid #eaeae8; border-radius: 0; background: transparent; }
+.fake-workspace .book-cover { width: 32px; height: 36px; border-radius: 4px; background: #eaf0ed; color: #388277; box-shadow: none; font-size: 20px; }
+.fake-workspace .book-info h3 { font-size: 13px; overflow-wrap: anywhere; }
+.fake-workspace .book-info p { color: #757570; font-size: 11px; }
+.fake-workspace .book-info small { color: #8e8e89; }
+.fake-workspace .book-progress { margin: 8px 0; }
+.fake-workspace .book-progress > div { background: #e9e9e6; }
+.fake-workspace .book-progress > div span { background: #388277; }
+.fake-workspace .book-actions { flex-wrap: wrap; }
+.fake-workspace .book-info button { padding: 5px 9px; border-radius: 5px; color: #444440; font-size: 11px; font-weight: 600; }
+.fake-workspace .book-actions .danger-command { color: #a14139; }
+.fake-workspace .novel-reader { scroll-margin-top: 16px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.fake-workspace .novel-reader[hidden] { display: none; }
+.fake-workspace .reader-toolbar, .fake-workspace .reader-controls, .fake-workspace .reader-actions { border-color: var(--reader-line); }
+.fake-workspace .reader-toolbar { grid-template-columns: 42px minmax(0, 1fr) auto auto; }
+.fake-workspace .reader-toolbar strong { overflow-wrap: anywhere; }
+.fake-workspace .reader-toolbar > button:last-child[hidden] { display: none; }
+.fake-workspace .reader-content { min-height: 240px; padding: 30px 24px; overflow-wrap: anywhere; }
+.embedded-browser-message { scroll-margin-top: 16px; }
+.embedded-browser { overflow: hidden; border: 1px solid #dededb; border-radius: 8px; background: #f7f7f5; box-shadow: 0 2px 10px rgba(0,0,0,.04); }
+.embedded-browser-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, auto); align-items: center; gap: 10px; min-height: 42px; padding: 6px 8px 6px 12px; border-bottom: 1px solid #e2e2df; background: #fbfbfa; }
+.embedded-browser-toolbar strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #363633; font-size: 12px; font-weight: 650; }
+.embedded-browser-status { color: #8b8b86; font-size: 10px; white-space: nowrap; }
+.embedded-browser-controls { display: flex; gap: 4px; }
+.embedded-browser-controls .icon-command { width: 28px; height: 28px; border-color: #e2e2df; color: #666661; background: #fff; font-size: 15px; }
+.embedded-browser-controls .icon-command:disabled { opacity: .38; cursor: default; }
+/* webview 必须脱离文档流(absolute)创建,guest 视口才能同步容器尺寸;静态定位会卡死在默认 150px 高度。 */
+.embedded-browser-view-wrap { position: relative; width: 100%; height: min(78vh, 800px); min-height: 480px; }
+.embedded-browser-view { display: flex; position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+.workspace-composer { flex: none; width: min(840px, calc(100% - 48px)); margin: 0 auto 20px; padding: 12px 12px 8px; border: 1px solid #d8d8d5; border-radius: 8px; box-shadow: 0 2px 9px rgba(0,0,0,.04); }
+.workspace-composer textarea { display: block; width: 100%; min-height: 46px; max-height: 120px; resize: vertical; border: 0; outline: 0; color: #333330; background: transparent; font-size: 13px; }
+.workspace-composer-footer { display: flex; align-items: center; justify-content: space-between; color: #92928e; font-size: 11px; }
+.workspace-composer-footer button { width: 28px; height: 28px; border: 0; border-radius: 6px; color: #fff; background: #353633; font-size: 19px; cursor: pointer; }
+
+@media (max-width: 760px) {
+    .fake-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+    .workspace-sidebar { flex-direction: row; align-items: center; gap: 6px; padding: 5px 12px; border-right: 0; border-bottom: 1px solid #e7e7e5; }
+    .workspace-brand { padding: 0 9px 0 0; font-size: 14px; }
+    .workspace-mark { width: 23px; height: 23px; font-size: 16px; }
+    .workspace-new, .workspace-nav-item, .workspace-back { width: auto; min-height: 30px; margin: 0; padding: 4px 7px; border: 0; font-size: 12px; white-space: nowrap; }
+    .workspace-new span, .workspace-nav-item span, .workspace-back span, .workspace-group-label, .workspace-recent { display: none; }
+    .workspace-back { margin-left: auto; }
+    .workspace-header { height: 52px; padding: 0 18px; }
+    .workspace-header-status { display: none; }
+    .workspace-messages { padding: 20px 16px 12px; }
+    .workspace-message { gap: 8px; }
+    .fake-workspace .panel-heading { align-items: flex-start; flex-direction: column; }
+    .fake-workspace .panel-heading-actions { justify-content: flex-start; }
+    .fake-workspace .reader-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .fake-workspace .reader-toolbar { grid-template-columns: 42px minmax(0, 1fr) auto; }
+    .fake-workspace .reader-toolbar > button:last-child:not([hidden]) { grid-column: 2 / -1; justify-self: end; }
+    .fake-workspace .reader-content { padding: 24px 16px; }
+    .embedded-browser-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+    .embedded-browser-status { display: none; }
+    .embedded-browser-view-wrap { height: 70vh; min-height: 360px; }
+    .workspace-composer { width: calc(100% - 28px); margin-bottom: 10px; }
+}

@@ -1342,6 +1342,13 @@ function applyFeedLayoutBounds(mode = getFeedLayoutMode(), { preserveCenter = tr
 
 // 按当前渠道应用 UA(手机版竖屏 / 桌面版),跨渠道切换时自动切换。
 let feedActiveChannel = 'bilibili';
+// 「你想要的」Codex 回复里嵌入的摸鱼 webview guest 集合:只用于 IPC 来源白名单
+// 与 feed:get-context 运行上下文查询,guest 拿不到任何本地能力。
+const embeddedFeedGuests = new Set();
+
+function isEmbeddedFeedFrame(event) {
+  return Boolean(event.sender) && embeddedFeedGuests.has(event.sender);
+}
 
 function applyFeedChannelContext(channelKey) {
   patchFeedMeta({ channel: channelKey });
@@ -1636,6 +1643,45 @@ async function playBiliVideo(rawInput) {
   return { ok: true };
 }
 
+// 给「你想要的」里的模拟 Codex 回复提供网页目标。这里不直接打开窗口，
+// 只返回主进程认可的官方地址，避免渲染层把任意 URL 塞进嵌入网页。
+async function resolveEmbeddedFeedTarget(request) {
+  if (typeof request === 'string') request = { type: 'channel', channel: request };
+  if (!request || typeof request !== 'object') return { ok: false, error: '网页目标无效' };
+
+  if (request.type === 'channel') {
+    const channel = typeof request.channel === 'string' ? request.channel : '';
+    const meta = FEED_CHANNELS[channel];
+    if (!meta) return { ok: false, error: '暂不支持这个网页渠道' };
+    // useragent 属性必须在创建 webview 时就带上:实测(Electron 38)不带该属性创建时
+    // guest 视口尺寸不跟随元素(高度卡死 150px / 随机偏大),页面被压扁——即「视频被截断」。
+    // 一律用桌面 UA:小红书桌面版 /explore 是响应式布局,窄视口自适应;
+    // 若用手机 UA 访问 /explore 会触发安全验证(验证码墙),反而不可用。
+    return { ok: true, type: 'channel', channel, name: meta.name, url: meta.url, userAgent: FEED_DEFAULT_UA };
+  }
+
+  if (request.type === 'video') {
+    let video = parseBiliVideoInput(request.input);
+    if (!video) return { ok: false, error: '无法识别的链接。支持 BV / av / 分 P 链接与 b23.tv 短链' };
+    if (video.shortUrl) {
+      const finalUrl = await resolveBiliShortUrl(video.shortUrl);
+      video = finalUrl ? parseBiliVideoInput(finalUrl) : null;
+      if (!video) return { ok: false, error: '短链解析失败，请粘贴完整视频链接（www.bilibili.com/video/…）' };
+    }
+    const saved = ensureFeedState().video;
+    const target = {
+      ...video,
+      mode: 'player',
+      danmaku: saved.danmaku,
+      autoplay: saved.autoplay
+    };
+    const url = buildBiliPlaybackUrl(target);
+    return url ? { ok: true, type: 'video', channel: 'bilibili', name: 'B站视频', url, userAgent: FEED_DEFAULT_UA } : { ok: false, error: '视频地址生成失败' };
+  }
+
+  return { ok: false, error: '网页目标类型无效' };
+}
+
 // 浮条「完整页面 / 外链播放器」:两种播放模式手动切换,不做脆弱的 DOM 自动检测。
 function toggleBiliPlayMode() {
   const video = ensureFeedState().video;
@@ -1717,6 +1763,7 @@ async function openWebPanel() {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        webviewTag: true,
         // 面板从打包文件加载(file://)时跨源直连本机 API;后端 CORS 已放行 null 源,
         // 且 API 需 Bearer 令牌(经启动参数注入 preload),无需关闭同源校验。
         additionalArguments: [
@@ -1728,6 +1775,36 @@ async function openWebPanel() {
           `--qagent-api-key=${apiKey}`
         ]
       }
+    });
+
+    // 只允许内嵌摸鱼网页访问受信任的平台。受信任平台注入与摸鱼小窗同款的
+    // feed_preload.js 做布局适配(抖音窄窗单列、隐藏下载App横幅与登录弹层);
+    // feed:* IPC 全部有来源白名单,guest frame 只能调用 feed:get-context,
+    // nodeIntegration 保持关闭,不暴露本地 preload 参数给远程页。
+    webWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+      if (!isTrustedEmbeddedFeedUrl(params?.src)) {
+        event.preventDefault();
+        return;
+      }
+      delete webPreferences.preloadURL;
+      delete webPreferences.additionalArguments;
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.sandbox = true;
+      webPreferences.partition = 'persist:feed';
+      webPreferences.preload = path.join(desktopRoot, 'feed_preload.js');
+    });
+
+    webWindow.webContents.on('did-attach-webview', (_event, guestContents) => {
+      embeddedFeedGuests.add(guestContents);
+      guestContents.once('destroyed', () => embeddedFeedGuests.delete(guestContents));
+      guestContents.setWindowOpenHandler(({ url }) => {
+        if (isTrustedEmbeddedFeedUrl(url)) guestContents.loadURL(url).catch(() => {});
+        return { action: 'deny' };
+      });
+      guestContents.on('will-navigate', (event, url) => {
+        if (!isTrustedEmbeddedFeedUrl(url)) event.preventDefault();
+      });
     });
 
     webWindow.on('closed', () => {
@@ -1796,7 +1873,8 @@ function startProactivePolling() {
 }
 
 // IPC 来源白名单：app:*/api:* 只允许本项目打包内的本地页面(file://)调用;
-// feed:* 额外放行摸鱼小窗自身(其 preload 运行在第三方远程页面上,属设计使然)。
+// feed:* 额外放行摸鱼小窗自身(其 preload 运行在第三方远程页面上,属设计使然),
+// 以及「你想要的」里嵌入的摸鱼 webview guest(allowEmbedded,guest 仅能调 feed:get-context)。
 // 防止被注入的页面借 IPC 改写运行时配置(如 LLM_BASE_URL)或调用本地 API。
 function isLocalPanelFrame(event) {
   try {
@@ -1813,9 +1891,24 @@ function isFeedFrame(event) {
   return Boolean(feedWindow && !feedWindow.isDestroyed() && event.sender === feedWindow.webContents);
 }
 
-function guardedHandle(channel, handler, { allowFeed = false } = {}) {
+function isTrustedEmbeddedFeedUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const trustedSuffixes = new Set([
+      ...Object.values(FEED_CHANNELS).map(meta => meta.host.replace(/^www\./i, '')),
+      'bilibili.com'
+    ]);
+    return [...trustedSuffixes].some(host => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+  } catch (error) {
+    return false;
+  }
+}
+
+function guardedHandle(channel, handler, { allowFeed = false, allowEmbedded = false } = {}) {
   ipcMain.handle(channel, async (event, ...args) => {
-    if (!isLocalPanelFrame(event) && !(allowFeed && isFeedFrame(event))) {
+    if (!isLocalPanelFrame(event) && !(allowFeed && isFeedFrame(event)) && !(allowEmbedded && isEmbeddedFeedFrame(event))) {
       throw new Error('Untrusted IPC sender');
     }
     return handler(event, ...args);
@@ -1963,6 +2056,10 @@ function registerIpc() {
   guardedHandle('app:open-feed', async () => { showFeedWindow(); return true; });
   // 打开小窗并直达指定渠道(B站/小红书/抖音),供托盘/Web 面板调用。
   guardedHandle('app:open-feed-channel', async (_event, channel) => { openFeedChannel(channel); return true; });
+  guardedHandle('feed:embedded-target', async (_event, request) => resolveEmbeddedFeedTarget(request));
+  // 摸鱼 preload(小窗与 Codex 嵌入 webview 同款)查询自身运行上下文:
+  // 嵌入模式不注入浮条、B 站卡片点击恢复页内跳转;小窗恒为 embedded=false。
+  guardedHandle('feed:get-context', (event) => ({ embedded: isEmbeddedFeedFrame(event) }), { allowFeed: true, allowEmbedded: true });
   // 真正关闭小窗:立即销毁渲染进程,停止后台视频/网络播放。
   guardedHandle('app:close-feed', async () => {
     if (feedWindow && !feedWindow.isDestroyed()) feedWindow.destroy();

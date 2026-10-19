@@ -16,7 +16,10 @@
         chapters: [],
         chapterIndex: 0,
         book: null,
+        query: '',
         leisureSession: null,
+        embeddedBrowserCard: null,
+        embeddedBrowserView: null,
         readerSettings: loadReaderSettings()
     };
 
@@ -91,6 +94,7 @@
 
     function selectTab(name, updateUrl = true) {
         const selected = name === 'leisure' ? 'leisure' : 'learn';
+        if (selected !== 'leisure') closeEmbeddedBrowser();
         document.querySelectorAll('.want-tab').forEach(button => {
             const active = button.dataset.tab === selected;
             button.classList.toggle('active', active);
@@ -98,6 +102,8 @@
         });
         document.getElementById('learn-panel').hidden = selected !== 'learn';
         document.getElementById('leisure-panel').hidden = selected !== 'leisure';
+        document.body.classList.toggle('leisure-mode', selected === 'leisure');
+        document.title = selected === 'leisure' ? 'Codex - 项目资料' : '你想要的 - QAgent Pet';
         if (updateUrl) history.replaceState(null, '', `want.html?ui=4&tab=${selected}`);
     }
 
@@ -169,9 +175,11 @@
         const list = document.getElementById('book-list');
         const status = document.getElementById('leisure-status');
         list.innerHTML = '';
+        const recent = document.getElementById('recent-book-list');
+        recent.replaceChildren();
         if (!state.books.length) {
-            list.innerHTML = '<div class="empty-state">书架暂时是空的</div>';
-            status.textContent = '暂无读物';
+            list.innerHTML = '<div class="empty-state">暂无资料</div>';
+            status.textContent = '暂无资料';
             return;
         }
         const sortedBooks = [...state.books].sort((first, second) => {
@@ -179,9 +187,19 @@
             const secondTime = Date.parse(state.progressByBook.get(second.book_id)?.last_read_at_utc || '') || 0;
             return secondTime - firstTime || String(first.title).localeCompare(String(second.title), 'zh-CN');
         });
-        sortedBooks.forEach(renderBook);
+        sortedBooks.filter(book => state.progressByBook.get(book.book_id)?.last_read_at_utc).slice(0, 6).forEach(book => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = book.title;
+            button.title = book.title;
+            button.addEventListener('click', () => openBook(book));
+            recent.appendChild(button);
+        });
+        const matches = sortedBooks.filter(book => `${book.title} ${book.author || ''} ${book.description || ''}`.toLowerCase().includes(state.query.toLowerCase()));
+        matches.forEach(renderBook);
+        if (!matches.length) list.innerHTML = '<div class="empty-state">没有找到匹配的资料</div>';
         const readingCount = sortedBooks.filter(book => progressPercent(state.progressByBook.get(book.book_id)) > 0).length;
-        status.textContent = readingCount ? `${sortedBooks.length} 本读物 · ${readingCount} 本有进度` : `${sortedBooks.length} 本内置读物`;
+        status.textContent = state.query ? `${matches.length} 条匹配结果` : readingCount ? `${sortedBooks.length} 份资料 · ${readingCount} 份有进度` : `${sortedBooks.length} 份资料`;
     }
 
     function canDesktopRead() {
@@ -189,7 +207,135 @@
     }
 
     function canDesktopFeed() {
-        return Boolean(window.desktopAPI && typeof window.desktopAPI.openFeed === 'function');
+        return Boolean(window.desktopAPI && typeof window.desktopAPI.resolveEmbeddedFeedTarget === 'function');
+    }
+
+    function closeEmbeddedBrowser() {
+        if (state.embeddedBrowserCard) state.embeddedBrowserCard.remove();
+        state.embeddedBrowserCard = null;
+        state.embeddedBrowserView = null;
+    }
+
+    function appendUserTurn(text) {
+        const turn = document.createElement('article');
+        turn.className = 'workspace-message workspace-user';
+        const bubble = document.createElement('div');
+        bubble.className = 'workspace-bubble';
+        bubble.textContent = text;
+        turn.appendChild(bubble);
+        document.getElementById('workspace-messages').insertBefore(turn, document.getElementById('novel-reader'));
+    }
+
+    function showEmbeddedBrowser(target) {
+        // Electron 的 webview guest 销毁是异步的。切换链接时复用现有 guest，
+        // 避免旧 guest 的原生表面还未销毁就与新 guest 重叠，造成 Codex 页面空白遮挡。
+        if (state.embeddedBrowserCard && state.embeddedBrowserView && state.embeddedBrowserView.isConnected) {
+            const title = state.embeddedBrowserCard.querySelector('.embedded-browser-toolbar strong');
+            const status = state.embeddedBrowserCard.querySelector('.embedded-browser-status');
+            if (title) title.textContent = target.name || '网页';
+            if (status) status.textContent = '正在加载…';
+            state.embeddedBrowserView.setAttribute('src', target.url);
+            state.embeddedBrowserCard.scrollIntoView({ block: 'start' });
+            return;
+        }
+
+        const card = document.createElement('article');
+        card.className = 'workspace-message workspace-assistant embedded-browser-message';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'workspace-avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = '✳';
+
+        const response = document.createElement('div');
+        response.className = 'workspace-response';
+        const heading = document.createElement('div');
+        heading.className = 'workspace-message-heading';
+        heading.textContent = 'Codex';
+
+        const browser = document.createElement('div');
+        browser.className = 'embedded-browser';
+        const toolbar = document.createElement('div');
+        toolbar.className = 'embedded-browser-toolbar';
+        const title = document.createElement('strong');
+        title.textContent = target.name || '网页';
+        const status = document.createElement('span');
+        status.className = 'embedded-browser-status';
+        status.textContent = '正在加载…';
+        const controls = document.createElement('div');
+        controls.className = 'embedded-browser-controls';
+        const makeButton = (label, name) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'icon-command';
+            button.textContent = label;
+            button.title = name;
+            button.setAttribute('aria-label', name);
+            return button;
+        };
+        const back = makeButton('←', '后退');
+        const forward = makeButton('→', '前进');
+        const reload = makeButton('↻', '刷新');
+        const close = makeButton('×', '关闭网页');
+        controls.append(back, forward, reload, close);
+        toolbar.append(title, status, controls);
+
+        const view = document.createElement('webview');
+        view.className = 'embedded-browser-view';
+        view.setAttribute('partition', 'persist:feed');
+        view.setAttribute('src', target.url);
+        view.setAttribute('allowpopups', 'false');
+        if (target.userAgent) view.setAttribute('useragent', target.userAgent);
+
+        const updateNavButtons = () => {
+            try {
+                back.disabled = !view.canGoBack();
+                forward.disabled = !view.canGoForward();
+            } catch (error) {
+                back.disabled = true;
+                forward.disabled = true;
+            }
+        };
+        back.addEventListener('click', () => { if (view.canGoBack()) view.goBack(); });
+        forward.addEventListener('click', () => { if (view.canGoForward()) view.goForward(); });
+        reload.addEventListener('click', () => view.reload());
+        close.addEventListener('click', closeEmbeddedBrowser);
+        view.addEventListener('did-start-loading', () => { status.textContent = '正在加载…'; });
+        view.addEventListener('dom-ready', () => { status.textContent = '已就绪'; updateNavButtons(); });
+        view.addEventListener('did-stop-loading', () => { status.textContent = '已就绪'; updateNavButtons(); });
+        view.addEventListener('did-navigate', updateNavButtons);
+        view.addEventListener('did-navigate-in-page', updateNavButtons);
+        view.addEventListener('did-fail-load', event => {
+            if (!event.isMainFrame) return;
+            status.textContent = '网页加载失败，请稍后重试';
+        });
+
+        const viewWrap = document.createElement('div');
+        viewWrap.className = 'embedded-browser-view-wrap';
+        viewWrap.appendChild(view);
+
+        browser.append(toolbar, viewWrap);
+        response.append(heading, browser);
+        card.append(avatar, response);
+        document.getElementById('workspace-messages').insertBefore(card, document.getElementById('novel-reader'));
+        state.embeddedBrowserCard = card;
+        state.embeddedBrowserView = view;
+        card.scrollIntoView({ block: 'start' });
+    }
+
+    async function openEmbeddedFeed(request, prompt) {
+        if (!canDesktopFeed()) return;
+        const result = await window.desktopAPI.resolveEmbeddedFeedTarget(request);
+        if (!result || !result.ok) {
+            const status = document.getElementById('leisure-status');
+            if (status) status.textContent = result?.error || '网页打开失败';
+            return result;
+        }
+        if (state.leisureSession) await closeReader();
+        document.getElementById('workspace-title').textContent = result.name || '摸鱼网页';
+        appendUserTurn(prompt || `打开${result.name || '网页'}`);
+        showEmbeddedBrowser(result);
+        return result;
     }
 
     function readOnDesktop(book) {
@@ -202,13 +348,13 @@
     function renderBook(book) {
         const progress = state.progressByBook.get(book.book_id);
         const percent = progressPercent(progress);
-        const buttonText = percent >= 100 ? '重新阅读' : percent > 0 ? '继续阅读' : '开始阅读';
+        const buttonText = percent >= 100 ? '重新查看' : percent > 0 ? '继续查看' : '打开资料';
         const progressText = percent >= 100 ? '已读完' : percent > 0 ? `已读 ${percent}%` : '还没开始';
         const isImported = book.content_source === 'user';
         const desktopBtn = canDesktopRead() ? '<button type="button" data-desktop>桌面阅读</button>' : '';
         const item = document.createElement('article');
         item.className = 'book-item';
-        item.innerHTML = `<div class="book-cover" aria-hidden="true">阅</div><div class="book-info"><small>${escapeHtml(book.author || 'QAgent')}</small><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.description || '')}</p><div class="book-progress"><div><span style="width:${percent}%"></span></div><small>${progressText}</small></div><div class="book-actions"><button type="button" data-read>${buttonText}</button>${desktopBtn}${isImported ? '<button type="button" class="danger-command" data-delete>删除</button>' : ''}</div></div>`;
+        item.innerHTML = `<div class="book-cover" aria-hidden="true">▤</div><div class="book-info"><small>${escapeHtml(book.author || '本地资料')}</small><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.description || '')}</p><div class="book-progress"><div><span style="width:${percent}%"></span></div><small>${progressText}</small></div><div class="book-actions"><button type="button" data-read>${buttonText}</button>${desktopBtn}${isImported ? '<button type="button" class="danger-command" data-delete>删除</button>' : ''}</div></div>`;
         item.querySelector('[data-read]').addEventListener('click', () => openBook(book));
         const desktopReadBtn = item.querySelector('[data-desktop]');
         if (desktopReadBtn) {
@@ -239,6 +385,8 @@
         const status = document.getElementById('leisure-status');
         status.textContent = '正在打开…';
         try {
+            closeEmbeddedBrowser();
+            if (state.leisureSession) await closeReader();
             const [chapters, progress, session] = await Promise.all([
                 API.listNovelChapters(book.book_id),
                 API.getNovelProgress(book.book_id),
@@ -251,7 +399,14 @@
             const savedIndex = state.chapters.findIndex(chapter => chapter.chapter_id === savedChapter);
             state.chapterIndex = savedIndex >= 0 ? savedIndex : 0;
             populateChapterSelect();
-            document.getElementById('leisure-library').hidden = true;
+            document.getElementById('workspace-title').textContent = book.title;
+            const turn = document.createElement('article');
+            turn.className = 'workspace-message workspace-user';
+            const bubble = document.createElement('div');
+            bubble.className = 'workspace-bubble';
+            bubble.textContent = `打开《${book.title}》`;
+            turn.appendChild(bubble);
+            document.getElementById('workspace-messages').insertBefore(turn, document.getElementById('novel-reader'));
             document.getElementById('novel-reader').hidden = false;
             const desktopBtn = document.getElementById('desktop-read-btn');
             if (desktopBtn) desktopBtn.hidden = !canDesktopRead();
@@ -307,34 +462,69 @@
             try { await API.closeLeisureSession(state.leisureSession.session_id); } catch (error) { /* keep local UI responsive */ }
         }
         state.leisureSession = null;
+        closeEmbeddedBrowser();
         document.getElementById('novel-reader').hidden = true;
-        document.getElementById('leisure-library').hidden = false;
+        document.getElementById('workspace-title').textContent = '项目资料整理';
         renderLibrary();
     }
 
     function bindEvents() {
         document.querySelectorAll('.want-tab').forEach(button => button.addEventListener('click', () => selectTab(button.dataset.tab)));
+        const showLibrary = async (newTask = false) => {
+            closeEmbeddedBrowser();
+            if (state.leisureSession) await closeReader();
+            state.query = '';
+            document.getElementById('workspace-query').value = '';
+            if (newTask) document.querySelectorAll('#workspace-messages .workspace-user:not(:first-child)').forEach(turn => turn.remove());
+            renderLibrary();
+            document.getElementById('workspace-messages').insertBefore(document.getElementById('leisure-library'), document.getElementById('novel-reader'));
+            document.getElementById('leisure-library').scrollIntoView({ block: 'start' });
+        };
+        document.getElementById('workspace-home').addEventListener('click', () => showLibrary(true));
+        document.getElementById('workspace-library').addEventListener('click', () => showLibrary());
+        const composer = document.getElementById('workspace-composer');
+        const queryInput = document.getElementById('workspace-query');
+        composer.addEventListener('submit', async event => {
+            event.preventDefault();
+            const query = queryInput.value.trim();
+            if (!query) return;
+            if (state.leisureSession) await closeReader();
+            closeEmbeddedBrowser();
+            appendUserTurn(`查找资料：${query}`);
+            const messages = document.getElementById('workspace-messages');
+            messages.insertBefore(document.getElementById('leisure-library'), document.getElementById('novel-reader'));
+            state.query = query;
+            queryInput.value = '';
+            renderLibrary();
+            document.getElementById('leisure-library').scrollIntoView({ block: 'start' });
+        });
+        queryInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                event.preventDefault();
+                composer.requestSubmit();
+            }
+        });
         document.getElementById('start-learning').addEventListener('click', () => {
             window.location.href = `learn.html?pet_id=${encodeURIComponent(state.petId)}`;
         });
         const feedSelect = document.getElementById('feed-channel-select');
         if (feedSelect) {
             feedSelect.hidden = !canDesktopFeed();
-            feedSelect.addEventListener('change', () => {
+            feedSelect.addEventListener('change', async () => {
                 const channel = feedSelect.value;
-                if (channel && typeof window.desktopAPI.openFeedChannel === 'function') {
-                    window.desktopAPI.openFeedChannel(channel).catch(() => {});
+                if (channel) {
+                    const option = feedSelect.options[feedSelect.selectedIndex];
+                    await openEmbeddedFeed({ type: 'channel', channel }, `打开${option?.textContent || '网页'}`);
                 }
                 feedSelect.value = '';
             });
         }
-        // 摸鱼·B 站本地播放:粘贴链接,在桌宠视频小窗里只播这个视频。
+        // 摸鱼·B 站视频作为一条新的 Codex 回复嵌入当前会话,不再弹出独立窗口。
         const playBiliBtn = document.getElementById('play-bili-video-btn');
         const biliBar = document.getElementById('bili-video-bar');
         const biliInput = document.getElementById('bili-video-input');
         const biliGo = document.getElementById('bili-video-go');
-        if (playBiliBtn && biliBar && biliInput && biliGo && canDesktopFeed()
-            && typeof window.desktopAPI.playBiliVideo === 'function') {
+        if (playBiliBtn && biliBar && biliInput && biliGo && canDesktopFeed()) {
             playBiliBtn.hidden = false;
             playBiliBtn.addEventListener('click', () => {
                 biliBar.hidden = !biliBar.hidden;
@@ -350,11 +540,11 @@
                 biliGo.disabled = true;
                 if (status) status.textContent = '正在解析链接…';
                 try {
-                    const result = await window.desktopAPI.playBiliVideo(value);
+                    const result = await openEmbeddedFeed({ type: 'video', input: value }, `播放 B 站视频：${value}`);
                     if (result && result.ok) {
                         biliInput.value = '';
                         biliBar.hidden = true;
-                        if (status) status.textContent = '已在桌宠视频小窗打开播放器';
+                        if (status) status.textContent = '已嵌入 Codex 回复';
                     } else {
                         if (status) status.textContent = (result && result.error) || '链接解析失败';
                     }

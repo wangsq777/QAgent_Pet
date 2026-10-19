@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   openFeed: () => ipcRenderer.invoke('app:open-feed'),
   openFeedChannel: (channel) => ipcRenderer.invoke('app:open-feed-channel', channel),
   playBiliVideo: (input) => ipcRenderer.invoke('feed:play-video', input),
+  resolveEmbeddedFeedTarget: (request) => ipcRenderer.invoke('feed:embedded-target', request),
   openSetup: () => ipcRenderer.invoke('app:open-setup'),
   openDataDir: () => ipcRenderer.invoke('app:open-data-dir'),
   getAutostart: () => ipcRenderer.invoke('app:get-autostart'),

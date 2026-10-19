@@ -10,6 +10,9 @@ const BAR_ID = 'qagent-feed-bar';
 const NAV_ID = 'qagent-feed-nav';
 let pinned = true;
 let collapsed = false;
+// 运行上下文:嵌入「你想要的」Codex 回复的 webview 时,外层已有工具栏与导航,
+// 不再注入浮条,B 站卡片点击也恢复为页内正常跳转(嵌入 guest 调不动 feed:* IPC)。
+let embeddedMode = false;
 
 // 导航栏站点:切换到对应平台的网页版(全部是普通浏览行为,无接口依赖)。
 // 小红书导航直指 /explore 信息流;抖音/快手首页即信息流(快手直达 /short-video 竖屏流);淘宝为桌面宽布局网页版。
@@ -175,12 +178,12 @@ const LAYOUT_CSS = `
   html.qagent-douyin-feed #douyin-right-container > [class*="portal-anchor-wrapper"],
   html.qagent-douyin-feed #douyin-right-container > [class*="FJW1IOm9"] {
     position: fixed !important;
-    top: 64px !important;
+    top: var(--qagent-feed-top, 64px) !important;
     right: 0 !important;
     bottom: 0 !important;
     left: 0 !important;
     width: 100vw !important;
-    height: calc(100vh - 64px) !important;
+    height: calc(100vh - var(--qagent-feed-top, 64px)) !important;
     min-width: 0 !important;
     max-width: none !important;
     margin: 0 !important;
@@ -191,12 +194,12 @@ const LAYOUT_CSS = `
   html.qagent-douyin-feed #slidelist [data-e2e="slideList"],
   html.qagent-douyin-feed .recommend-slidelist {
     position: fixed !important;
-    top: 64px !important;
+    top: var(--qagent-feed-top, 64px) !important;
     right: 0 !important;
     bottom: 0 !important;
     left: 0 !important;
     width: 100vw !important;
-    height: calc(100vh - 64px) !important;
+    height: calc(100vh - var(--qagent-feed-top, 64px)) !important;
     min-width: 0 !important;
     max-width: none !important;
     margin: 0 !important;
@@ -308,9 +311,11 @@ function installLayoutStyle() {
 }
 
 function markDouyinLayout() {
-  if ((window.location.hostname || '').toLowerCase().endsWith('douyin.com')) {
-    document.documentElement.classList.add('qagent-douyin-feed');
-  }
+  if (!(window.location.hostname || '').toLowerCase().endsWith('douyin.com')) return;
+  document.documentElement.classList.add('qagent-douyin-feed');
+  // 嵌入 webview 没有 34px 浮条 + 30px 导航栏,内容层直接从视口顶部开始,
+  // 避免顶部留出 64px 黑边、底部内容被顶出裁掉。
+  if (embeddedMode) document.documentElement.style.setProperty('--qagent-feed-top', '0px');
 }
 
 function findBiliCard(anchor) {
@@ -355,6 +360,8 @@ function markBilibiliCards() {
 
 function installBilibiliVideoClick() {
   if (!(window.location.hostname || '').toLowerCase().endsWith('bilibili.com')) return;
+  // 嵌入 webview 里没有可用的 feed:play-video,拦截点击反而会让卡片无法跳转。
+  if (embeddedMode) return;
   if (document.documentElement.dataset.qagentBiliClickBound === '1') return;
   document.documentElement.dataset.qagentBiliClickBound = '1';
   document.addEventListener('click', (event) => {
@@ -550,19 +557,32 @@ function injectBar(playback) {
 // 播放状态由主进程持久化(config.json feed.video):preload 每次加载时读取,
 // 决定本次文档按信息流模式还是播放模式渲染浮条。
 function injectBarWithPlayback() {
+  // 嵌入「你想要的」Codex 回复的 webview:外层卡片自带工具栏,且 guest 调不动
+  // feed:* IPC(会被来源白名单拒绝),注入浮条只会白占 64px 高度。
+  if (embeddedMode) return;
   ipcRenderer.invoke('feed:get-playback')
     .then((playback) => injectBar(playback))
     .catch(() => injectBar(null));
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    injectBarWithPlayback();
-    initPromptHiding();
-    initSiteLayout();
-  }, { once: true });
-} else {
+// 先向主进程确认自身运行上下文(小窗 or 嵌入 webview),再决定浮条/点击拦截行为;
+// 布局适配与横幅隐藏两种模式都要,紧随其后统一初始化。
+function resolveRuntimeContext() {
+  return ipcRenderer.invoke('feed:get-context')
+    .then((context) => { embeddedMode = Boolean(context && context.embedded); })
+    .catch(() => { embeddedMode = false; });
+}
+
+function startFeedAdaptations() {
   injectBarWithPlayback();
   initPromptHiding();
   initSiteLayout();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    resolveRuntimeContext().finally(startFeedAdaptations);
+  }, { once: true });
+} else {
+  resolveRuntimeContext().finally(startFeedAdaptations);
 }

@@ -28,7 +28,8 @@ def _utf8_read_file(self, file_name):
 _sc.Config._read_file = _utf8_read_file
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import init_database
@@ -81,7 +82,7 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > 1024 * 1024:  # 1MB
-            raise HTTPException(status_code=413, detail="Request too large")
+            return JSONResponse(status_code=413, content={"detail": "Request too large"})
         return await call_next(request)
 
 app.add_middleware(MaxBodySizeMiddleware)
