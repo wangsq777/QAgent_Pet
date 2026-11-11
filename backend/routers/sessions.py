@@ -11,6 +11,8 @@ from backend.schemas import SessionCreateRequest, SessionResponse, SimulateTimeR
 from backend.services.llm_service import llm_service
 from backend.services.pet_reminder_service import generate_share_daily_message, get_reminder_identity
 from backend.services.memory_service import memory_service
+from backend.services.memory_store import memory_store
+from backend.services.memory_writer import memory_writer
 from backend import prompts
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -317,8 +319,9 @@ async def get_pet_status(session_id: str, request: Request):
         recent_emotion = (emotion_row["emotion_tag"] if emotion_row else "") or ""
 
         cursor = await db.execute(
-            "SELECT mood_tendency FROM user_profiles WHERE user_id = ?",
-            (session_dict["user_id"],)
+            "SELECT mood_tendency FROM pet_mood_snapshots WHERE user_id = ? AND pet_key = ?",
+            (session_dict["user_id"], 'custom:'+session_dict['custom_pet_id'] if session_dict['pet_type']=='custom'
+             else 'preset:'+session_dict['pet_type'])
         )
         profile_row = await cursor.fetchone()
         mood_tendency = profile_row["mood_tendency"] if profile_row else None
@@ -583,16 +586,20 @@ async def get_memory_panel(session_id: str, request: Request):
 
         intimacy_level = get_intimacy_level(intimacy)
 
-        long_term_memories = await memory_service.get_long_term_memories(session_id)
+        memory_page = await memory_store.list(await memory_store.identity(session_id))
+        long_term_memories = [dict(memory_id=m['memory_id'], summary=m['content'], created_at=m['created_at'])
+                              for m in memory_page['items'] if m['kind'] in ('episode','legacy_episode','ongoing')]
         recent_messages_count = await memory_service.get_message_count(session_id)
 
-        user_profile = await memory_service.get_user_profile(session_dict["user_id"]) or {}
+        user_profile = await memory_store.profile(await memory_store.identity(session_id))
 
         return MemoryPanelResponse(
             intimacy=intimacy,
             intimacy_level=intimacy_level,
             total_chats=total_chats,
             long_term_memories=long_term_memories,
+            memories=memory_page["items"],
+            next_cursor=memory_page["next_cursor"],
             recent_messages_count=recent_messages_count,
             user_profile={
                 "region": user_profile.get("region"),
@@ -630,17 +637,6 @@ async def update_user_profile(session_id: str, body: UserProfileUpdateRequest, r
         if user_id != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        profile_data = {
-            "region": body.region if body.region else "未知",
-            "identity": body.identity if body.identity else "未知",
-            "interests": body.interests if body.interests else "未知",
-            "occupation": body.occupation if body.occupation else "未知",
-            "personality_hint": body.personality_hint if body.personality_hint else "未知",
-            "active_hours": body.active_hours if body.active_hours else "未知",
-            "mood_tendency": body.mood_tendency if body.mood_tendency else "未知",
-            "extra_info": body.extra_info if body.extra_info else "未知"
-        }
-
-        await memory_service.save_user_profile(user_id, profile_data)
-
-        return UserProfileUpdateRequest(**profile_data)
+        profile_data = body.model_dump(exclude_unset=True)
+        await memory_writer.manual_profile(session_id, profile_data)
+        return UserProfileUpdateRequest(**await memory_store.profile(await memory_store.identity(session_id)))

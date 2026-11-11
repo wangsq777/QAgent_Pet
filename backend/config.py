@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-small"
 
+    # Memory budgets are tokens, never a limit on the age/count of stored memories.
+    MEMORY_CONTEXT_TOKENS: int = 16000
+    MEMORY_OUTPUT_TOKENS: int = 2000
+    MEMORY_SAFETY_TOKENS: int = 1000
+    MEMORY_SHORT_TOKENS: int = 6000
+    MEMORY_RECALL_TOKENS: int = 2000
+    MEMORY_BATCH_TOKENS: int = 4000
+    MEMORY_CANDIDATES: int = 40
+    MEMORY_MIN_SIMILARITY: float = 0.35
+    MEMORY_WORKER_INTERVAL: float = 5.0
+    MEMORY_EXTRACTION_ENABLED: bool = True
+    MEMORY_SHADOW_MODE: bool = False
+
     # 可信反向代理 CIDR 列表（逗号分隔）。
     # 仅当请求直接来自这些代理时，才信任 X-Forwarded-For / X-Real-IP，
     # 防止客户端伪造这些头部。生产部署在 Render / nginx / Caddy 之后时应配置为代理出口 IP。

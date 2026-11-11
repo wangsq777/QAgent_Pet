@@ -37,7 +37,7 @@ class EmbeddingService:
         api_url = self._get_api_url()
         payload = {
             "model": self.model,
-            "input": text.strip()[:2000]
+            "input": text.strip()
         }
 
         try:
@@ -101,12 +101,12 @@ class EmbeddingService:
         async with get_db() as db:
             if source_type:
                 cursor = await db.execute(
-                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? AND source_type = ? ORDER BY created_at DESC LIMIT 500",
+                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? AND source_type = ? ORDER BY created_at DESC",
                     (session_id, source_type)
                 )
             else:
                 cursor = await db.execute(
-                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? ORDER BY created_at DESC LIMIT 500",
+                    "SELECT vector_id, source_type, source_id, content, embedding, importance, created_at FROM memory_vectors WHERE session_id = ? ORDER BY created_at DESC",
                     (session_id,)
                 )
             rows = await cursor.fetchall()
@@ -122,6 +122,8 @@ class EmbeddingService:
                 continue
 
             stored_vector = json.loads(row_dict["embedding"])
+            if len(stored_vector) != len(query_vector):
+                continue
             similarity = self._cosine_similarity(query_vector, stored_vector)
 
             created_at = datetime.fromisoformat(row_dict["created_at"])

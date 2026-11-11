@@ -10,6 +10,7 @@ user_events 表是各 Agent 之间的事件通道：
 """
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from backend.database import get_db
 from backend.logging_config import get_logger
@@ -30,11 +31,11 @@ class EventService:
             async with get_db() as db:
                 await db.execute(
                     """
-                    INSERT INTO user_events (event_id, user_id, session_id, event_type, payload_json)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO user_events (event_id, user_id, session_id, event_type, payload_json,created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (str(uuid.uuid4()), user_id, session_id, event_type,
-                     json.dumps(payload, ensure_ascii=False))
+                     json.dumps(payload, ensure_ascii=False),datetime.now(timezone.utc).isoformat())
                 )
                 await db.commit()
         except Exception as e:
@@ -44,12 +45,19 @@ class EventService:
         self,
         user_id: str,
         event_type: Optional[str] = None,
-        limit: int = 20
+        limit: int = 20,
+        session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """按时间正序返回最近事件（payload 已反序列化）。查询失败返回空列表。"""
         try:
             async with get_db() as db:
-                if event_type:
+                if session_id:
+                    cursor = await db.execute(
+                        "SELECT event_type,payload_json,created_at FROM user_events "
+                        "WHERE user_id=? AND session_id=? AND (? IS NULL OR event_type=?) "
+                        "ORDER BY created_at DESC,rowid DESC LIMIT ?",
+                        (user_id,session_id,event_type,event_type,limit))
+                elif event_type:
                     cursor = await db.execute(
                         """
                         SELECT event_type, payload_json, created_at FROM user_events
@@ -85,9 +93,9 @@ class EventService:
             logger.warning("[event_service] 事件查询失败 user_id=%s: %s", user_id, e)
             return []
 
-    async def latest_event(self, user_id: str, event_type: str) -> Optional[Dict[str, Any]]:
+    async def latest_event(self, user_id: str, event_type: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """返回某类型最新一条事件（作为分析水位线），无则 None。"""
-        events = await self.recent_events(user_id, event_type=event_type, limit=1)
+        events = await self.recent_events(user_id, event_type=event_type, limit=1, session_id=session_id)
         return events[-1] if events else None
 
 

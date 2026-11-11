@@ -3,7 +3,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Query
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from backend.database import get_db
@@ -13,11 +13,14 @@ from backend.services.pet_reminder_service import generate_share_daily_message, 
 from backend.services.memory_service import memory_service
 from backend.services.weather_service import weather_service
 from backend.services.tool_executor import tool_executor
-from backend.services.user_profile_agent import user_profile_agent
 from backend.services.mood_agent import mood_agent
 from backend.services.event_service import event_service
 from backend import prompts
-from backend.services.embedding_service import embedding_service
+from backend.config import settings
+from backend.services.memory_store import memory_store
+from backend.services.memory_writer import memory_writer
+from backend.services.memory_context import context_builder
+from backend.services.memory_worker import memory_worker
 from backend.services.schedule_service import create_schedule, normalize_schedule_time
 from backend.services.time_service import utc_iso
 from backend.prompts.custom_pet import _sanitize_user_input
@@ -280,7 +283,9 @@ def detect_catchphrase_in_history(recent_messages: list, catchphrase: str) -> bo
         return False
 
     for msg in recent_messages:
-        if msg.role == "assistant" and catchphrase in msg.content:
+        role = msg.get('role') if isinstance(msg,dict) else msg.role
+        content = msg.get('content','') if isinstance(msg,dict) else msg.content
+        if role == "assistant" and catchphrase in content:
             return True
 
     return False
@@ -359,7 +364,7 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
             system_prompt = pet_info.get_system_prompt() if pet_info else "你是我的宠物。"
 
         # 用户画像（8 字段全量注入）
-        user_profile = await memory_service.get_user_profile(session_dict["user_id"]) or {}
+        user_profile = await memory_store.profile(await memory_store.identity(session_id))
         profile_text = (
             f"地区: {user_profile.get('region', '未知')}; "
             f"身份: {user_profile.get('identity', '未知')}; "
@@ -388,7 +393,8 @@ async def build_context(session_id: str, pet_type: str, custom_pet_id: str = Non
 async def execute_tools_and_build_final_prompt(
     reply: str,
     original_prompt: str,
-    pet_type: str
+    pet_type: str,
+    model_messages: Optional[list] = None
 ) -> tuple[str, dict, EmotionalReply]:
     """
     解析并执行 LLM 返回的工具调用，然后将工具结果反馈给 LLM 生成最终回复
@@ -435,7 +441,13 @@ async def execute_tools_and_build_final_prompt(
 {{"reply": "你的回复内容", "emotion": "用户情绪(happy/sad/anxious/tired/neutral)", "need": "情感需求(companionship/venting/validation/encouragement/advice/calming/distraction/celebration/reflection/crisis_support/unknown)", "intensity": 1, "risk_level": "none"}}
 字段为系统内部判断，【不要】在 reply 里告诉用户"你现在是某某情绪"。risk_level=high 时回复必须认真严肃、不开玩笑、引导现实求助。"""
 
-    raw_final = await llm_service.chat([{"role": "user", "content": second_prompt}], caller="tool_feedback", max_tokens=2000)
+    if model_messages:
+        from backend.services.memory_text import fit_text
+        tool_feedback = fit_text(second_prompt[len(original_prompt):], settings.MEMORY_SAFETY_TOKENS)
+        feedback_messages = context_builder.tool_messages(model_messages,reply,tool_feedback)
+    else:
+        feedback_messages = [{"role":"user","content":second_prompt}]
+    raw_final = await llm_service.chat(feedback_messages, caller="tool_feedback", max_tokens=settings.MEMORY_OUTPUT_TOKENS)
 
     # 如果 LLM 生成回复成功，返回结果（并清理可能的 TOOL_CALL 标记）
     if raw_final:
@@ -504,10 +516,18 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
                     (datetime.now(), session_id)
                 )
                 session_dict["pet_status"] = "normal"
+                await db.commit()
 
         if pet_type == "cold_cat" and session_dict["total_chats"] > 0:
             import random
             if random.random() < 0.3:
+                lazy_source = await memory_service.save_message(session_id,'user',chat_req.content)
+                lazy_updated = bool(await memory_writer.observe(session_id,lazy_source))
+                await memory_service.save_message(session_id,'assistant','......')
+                memory_worker.notify()
+                await db.execute('UPDATE pet_sessions SET total_chats=total_chats+1,last_interaction_at=?,updated_at=? WHERE session_id=?',
+                                 (datetime.now(),datetime.now(),session_id))
+                await db.commit()
                 # 懒说话时仍需检查是否需要分享日常
                 daily_share = None
                 if random.random() < 0.33:
@@ -520,39 +540,28 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
                     reply="......",
                     emotion_tag="neutral",
                     intimacy=session_dict["intimacy"],
-                    total_chats=session_dict["total_chats"],
+                    total_chats=session_dict["total_chats"]+1,
                     schedule_extracted=None,
                     memory_compressed=False,
+                    user_profile_updated=lazy_updated,
                     daily_share=daily_share
                 )
 
     user_msg_id = await memory_service.save_message(session_id, "user", chat_req.content)
 
-    # 为用户消息生成向量（异步，失败不影响主流程）
-    user_msg_embedding = await embedding_service.embed(chat_req.content)
-
-    # 对用户输入做安全过滤，防止 prompt 注入
+    # Explicit, grounded corrections are committed before reading context.
+    user_profile_updated = False
+    try:
+        user_profile_updated = bool(await memory_writer.observe(session_id, user_msg_id))
+    except Exception as exc:
+        logger.warning("Immediate memory write queued for retry: %s", type(exc).__name__)
     sanitized_content = _sanitize_user_input(chat_req.content)
-    if user_msg_embedding:
-        await embedding_service.save_vector(
-            session_id=session_id,
-            source_type="message",
-            source_id=user_msg_id,
-            content=chat_req.content,
-            embedding=user_msg_embedding
-        )
-
+    identity = await memory_store.identity(session_id, request.state.user_id)
+    prepared_context = await context_builder.build(identity, user_msg_id, sanitized_content)
     context = await build_context(session_id, pet_type, custom_pet_id)
+    prepared_context['profile'] = context['user_profile']
     pet_name = context.get("pet_name", "小可爱")
-
-    # --- 双通道 + 向量检索 ---
-    # 通道 A: 滑动窗口（最近 10 条）
-    recent_messages = await memory_service.get_short_term_messages(session_id, limit=10)
-    recent_ids = set(m.message_id for m in recent_messages)
-    recent_conversation = "\n".join([
-        f"{'主人' if m.role == 'user' else pet_name}: {m.content}"
-        for m in recent_messages
-    ]) or "（暂无对话）"
+    recent_messages = prepared_context['recent']
 
     # 口头禅概率控制（带 user_id 归属校验，防止越权读取他人自定义宠物口头禅）
     catchphrase = await get_catchphrase_async(pet_type, custom_pet_id, request.state.user_id)
@@ -563,39 +572,9 @@ async def chat(request: Request, session_id: str, chat_req: ChatRequest, backgro
         else:
             catchphrase_rule = f"7. 本次回复请使用口头禅：'{catchphrase}'\n"
 
-    # 通道 B: 向量检索相关历史（top-5 消息）
-    related_memories = "（暂无相关记忆）"
-    if user_msg_embedding:
-        related = await embedding_service.search(
-            query_vector=user_msg_embedding,
-            session_id=session_id,
-            top_k=5,
-            source_type="message",
-            exclude_source_ids=list(recent_ids)
-        )
-        if related:
-            related_memories = "\n".join([
-                f"[相关记忆] {item['content'][:200]}"
-                for item in related
-            ])
-
-    # 长期记忆: 向量检索 top-3
-    long_term_memory = "（暂无长期记忆）"
-    if user_msg_embedding:
-        long_term_related = await embedding_service.search(
-            query_vector=user_msg_embedding,
-            session_id=session_id,
-            top_k=3,
-            source_type="long_term"
-        )
-        if long_term_related:
-            long_term_memory = "\n".join([
-                item["content"] for item in long_term_related
-            ])
-
-    # 位置提示
-    saved_region = user_profile.get("region") if (user_profile := await memory_service.get_user_profile(context.get("user_id", ""))) else None
-    location_hint = f"（根据历史记录，用户可能在 {saved_region}）" if saved_region else "（暂无用户位置信息）"
+    scoped_profile = await memory_store.profile(identity)
+    saved_region = scoped_profile.get('region')
+    location_hint = f"（用户当前居住城市: {saved_region}）" if saved_region else "（暂无用户位置信息）"
 
     skills_section = f"""{context['skills']}
 
@@ -611,37 +590,10 @@ Agent 需要自主从用户消息中识别位置信息：
 {location_hint}
 """
 
-    full_prompt = f"""<system>
-{context['system_prompt']}
-</system>
+    full_prompt = f"""{context['system_prompt']}
 
-<long_term_memory>
-{long_term_memory}
-</long_term_memory>
-
-<user_profile>
-{context['user_profile']}
-</user_profile>
-
-<intimacy>
 {context['intimacy_info']}
-</intimacy>
-
-<skills>
 {skills_section}
-</skills>
-
-<recent_conversation>
-{recent_conversation}
-</recent_conversation>
-
-<related_memories>
-{related_memories}
-</related_memories>
-
-<current_message>
-主人: {sanitized_content}
-</current_message>
 
 【重要规则】
 1. 如果用户询问天气，你需要知道用户在哪：
@@ -663,10 +615,11 @@ Agent 需要自主从用户消息中识别位置信息：
 - need：用户此刻更可能需要的情感支持方式（陪伴/倾诉/认可/鼓励/建议/安抚/转移注意力/庆祝/梳理/危机支持/不确定）。
 - intensity：情绪强度 1-5，1 轻微、3 中等、5 极强。
 - risk_level：安全风险等级 none/low/medium/high。当用户表达自伤、自杀、伤害他人、极度绝望时取 high。
-- profile_update（可选字段）：仅当用户本轮【明确陈述】自己居住城市发生变化（如"我搬到上海了"）时，额外输出 "profile_update": {{"region": "城市名"}}；其余情况不要输出该字段，不要根据猜测填写。
+- 用户事实由记忆服务维护，请勿通过回复声明未经证据支持的画像更新。
 【安全】当 risk_level=high 时，回复必须认真严肃，不开玩笑、不轻描淡写，鼓励用户联系现实中可信任的人或紧急求助，并说明本产品不是专业心理咨询。"""
 
-    raw_reply = await llm_service.chat([{"role": "user", "content": full_prompt}], caller="main_chat", max_tokens=2000, timeout=90.0)
+    model_messages = context_builder.messages(full_prompt, prepared_context, sanitized_content)
+    raw_reply = await llm_service.chat(model_messages, caller="main_chat", max_tokens=settings.MEMORY_OUTPUT_TOKENS, timeout=90.0)
     if not raw_reply:
         fallback_replies = {
             "hot_dog": "汪？主人，我突然不知道说什么了...",
@@ -680,7 +633,7 @@ Agent 需要自主从用户消息中识别位置信息：
 
     # 执行工具调用并生成最终回复（ReAct 模式）
     reply, tool_results, tool_emo = await execute_tools_and_build_final_prompt(
-        emo.reply, full_prompt, pet_type
+        emo.reply, full_prompt, pet_type, model_messages
     )
 
     # 协调首轮与工具路径的情感字段：
@@ -699,17 +652,6 @@ Agent 需要自主从用户消息中识别位置信息：
             emotion_intensity = tool_emo.intensity
         if tool_emo.risk_level != "none":
             risk_level = tool_emo.risk_level
-
-    # 主 Agent 声明的画像更新：信任闸门过滤后同步落库并刷新缓存（亚毫秒级），
-    # 保证下一轮对话的 prompt 与工具决策立即使用新值
-    user_profile_updated = False
-    if emo.profile_update:
-        try:
-            user_profile_updated = await memory_service.apply_main_agent_profile_update(
-                session_dict["user_id"], emo.profile_update
-            )
-        except Exception as e:
-            logger.warning("主 Agent 画像更新失败 user_id=%s: %s", session_dict.get("user_id"), e)
 
     # risk_level=high 安全回应策略：在安全规则约束下重新生成回复，
     # 保持宠物人格但优先安全、不开玩笑、引导现实求助、声明非专业服务。
@@ -751,21 +693,6 @@ Agent 需要自主从用户消息中识别位置信息：
             await db.commit()
         logger.info("Schedule saved: %s", schedule_extracted)
 
-    # 后台更新用户画像（使用用户画像总结 Agent，不阻塞响应）
-    async def _update_user_profile():
-        try:
-            existing_profile = await memory_service.get_user_profile(session_dict.get("user_id", ""))
-            extracted_profile = await user_profile_agent.analyze_and_extract(
-                recent_conversation,
-                existing_profile
-            )
-            if extracted_profile:
-                await memory_service.merge_user_profile(session_dict["user_id"], extracted_profile)
-                logger.debug("User profile updated by agent: %s", extracted_profile)
-        except Exception as e:
-            logger.warning("User profile agent error: %s", e)
-    background_tasks.add_task(_update_user_profile)
-
     assistant_msg_id = await memory_service.save_message(
         session_id, "assistant", reply,
         emotion_tag=emotion_tag,
@@ -774,33 +701,14 @@ Agent 需要自主从用户消息中识别位置信息：
         risk_level=risk_level
     )
 
-    # 为助手回复生成向量
-    assistant_embedding = await embedding_service.embed(reply)
-    if assistant_embedding:
-        await embedding_service.save_vector(
-            session_id=session_id,
-            source_type="message",
-            source_id=assistant_msg_id,
-            content=reply,
-            embedding=assistant_embedding
-        )
-
     intimacy_change = calculate_intimacy_change(emotion_tag, emotional_need, emotion_intensity)
     new_intimacy = min(100, session_dict["intimacy"] + intimacy_change)
     new_total_chats = session_dict["total_chats"] + 1
 
-    # 话题感知压缩触发
+    # Persisted extraction jobs were written atomically with the user message.
+    # The lifespan-owned worker also retries/restarts without holding the HTTP response.
+    memory_worker.notify()
     memory_compressed = False
-    recent_for_compress = await memory_service.get_short_term_messages(session_id, limit=10)
-    recent_dicts = [{"role": m.role, "content": m.content} for m in recent_for_compress]
-    should_compress = await memory_service.should_compress(session_id, recent_dicts, chat_req.content)
-    if should_compress:
-        all_messages = await memory_service.get_short_term_messages(session_id, limit=100)
-        window_ids = set(m.message_id for m in recent_for_compress)
-        uncompress_messages = [m for m in all_messages if m.message_id not in window_ids]
-        if uncompress_messages:
-            await memory_service.compress_to_long_term(session_id, uncompress_messages[:15], pet_name)
-            memory_compressed = True
 
     async with get_db() as db:
         await db.execute(
@@ -824,6 +732,7 @@ Agent 需要自主从用户消息中识别位置信息：
     await event_service.append_event(
         session_dict["user_id"], session_id, "emotion_observed",
         {
+            "source_message_id": user_msg_id,
             "emotion": emotion_tag,
             "need": emotional_need,
             "intensity": emotion_intensity,
@@ -832,7 +741,7 @@ Agent 需要自主从用户消息中识别位置信息：
     )
 
     # 情绪信号驱动触发后台趋势分析（零阻塞）
-    if await mood_agent.should_trigger(session_dict["user_id"]):
+    if await mood_agent.should_trigger(session_dict["user_id"], session_id):
         background_tasks.add_task(
             mood_agent.analyze_mood_tendency,
             user_id=session_dict["user_id"],
@@ -852,7 +761,8 @@ Agent 需要自主从用户消息中识别位置信息：
 
 
 @router.get("/{session_id}/messages", response_model=MessageListResponse)
-async def get_messages(session_id: str, request: Request):
+async def get_messages(session_id: str, request: Request, before: Optional[int] = Query(None,ge=1),
+                       limit: int = Query(100,ge=1,le=500)):
     _validate_uuid(session_id, "session_id")
     async with get_db() as db:
         cursor = await db.execute(
@@ -866,5 +776,10 @@ async def get_messages(session_id: str, request: Request):
         if dict(session).get("user_id") != request.state.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-    messages = await memory_service.get_short_term_messages(session_id, limit=100)
-    return MessageListResponse(messages=messages, total=len(messages))
+    messages = await memory_service.get_short_term_messages(session_id, limit=limit+1, before=before)
+    has_more = len(messages)>limit
+    messages = messages[-limit:]
+    async with get_db() as db:
+        total = (await (await db.execute('SELECT COUNT(*) FROM messages WHERE session_id=?',(session_id,))).fetchone())[0]
+    return MessageListResponse(messages=messages, total=total,
+                               next_cursor=messages[0].seq if has_more and messages else None)

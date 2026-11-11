@@ -37,6 +37,7 @@ from backend.routers import sessions_router, chat_router, proactive_router, sche
 from backend.routers.custom_pets import router as custom_pets_router
 from backend.routers.visits import router as visits_router
 from backend.routers.learning import router as learning_router
+from backend.routers.memories import router as memories_router
 from backend.auth import AuthMiddleware
 from backend.config import settings
 from backend.logging_config import get_logger
@@ -50,9 +51,14 @@ logger = get_logger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_database()
+    from backend.services.memory_worker import memory_worker
+    await memory_worker.start()
     logger.info("Database initialized")
-    yield
-    logger.info("Application shutdown")
+    try:
+        yield
+    finally:
+        await memory_worker.stop()
+        logger.info("Application shutdown")
 
 
 app = FastAPI(
@@ -102,6 +108,7 @@ app.include_router(schedules_router)
 app.include_router(concerns_router)
 app.include_router(leisure_router)
 app.include_router(weather_router)
+app.include_router(memories_router)
 
 # 纯桌面端：不再对外托管 web 前端，仅保留本地 API 服务
 @app.get("/health")

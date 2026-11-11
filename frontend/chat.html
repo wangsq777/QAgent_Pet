@@ -145,7 +145,11 @@
 
                 <div class="panel-section">
                     <h4>长期记忆</h4>
-                    <p class="empty-hint">当前版本展示画像摘要；后续桌宠端会复用这些记忆做主动陪伴。</p>
+                    <p class="empty-hint">基础资料可共享；相处经历和私密内容只属于当前宠物。</p>
+                    <label class="memory-history-toggle"><input id="memory-history" type="checkbox"> 显示历史版本</label>
+                    <div id="memory-entries" aria-live="polite"></div>
+                    <button id="memory-more" type="button" hidden>加载更多记忆</button>
+                    <p class="empty-hint">遗忘会停止召回和再次提取；聊天原文与备份仍保留。</p>
                 </div>
             </aside>
         </main>

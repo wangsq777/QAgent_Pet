@@ -379,6 +379,11 @@ class CrossPetService:
             )
             await db.commit()
 
+        from backend.services.memory_store import memory_store
+        identity = await memory_store.identity(session_id)
+        await memory_store.write(identity,dict(kind='episode',predicate='experience',value=summary,scope='pet'),
+                                 source_id=source_range,source_type='visit',speaker='pet',manual=True)
+
         embedding = await embedding_service.embed(summary)
         if embedding:
             await embedding_service.save_vector(

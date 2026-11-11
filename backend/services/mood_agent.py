@@ -99,13 +99,13 @@ def aggregate_mood_by_rules(events: List[Dict[str, Any]]) -> Optional[Dict[str, 
 class MoodAgent:
     EVENT_WINDOW = 15  # 每次分析读取的最近情绪事件条数
 
-    async def should_trigger(self, user_id: str) -> bool:
+    async def should_trigger(self, user_id: str, session_id: str = None) -> bool:
         """信号驱动触发判断：以上一次 mood_analyzed 事件为水位线"""
         from backend.services.event_service import event_service
 
-        last_analysis = await event_service.latest_event(user_id, "mood_analyzed")
+        last_analysis = await event_service.latest_event(user_id, "mood_analyzed", session_id=session_id)
         events = await event_service.recent_events(
-            user_id, event_type="emotion_observed", limit=20
+            user_id, event_type="emotion_observed", limit=20, session_id=session_id
         )
         if last_analysis:
             watermark = last_analysis["created_at"]
@@ -123,12 +123,18 @@ class MoodAgent:
             from backend.services.memory_service import memory_service
 
             events = await event_service.recent_events(
-                user_id, event_type="emotion_observed", limit=self.EVENT_WINDOW
+                user_id, event_type="emotion_observed", limit=self.EVENT_WINDOW, session_id=session_id
             )
             if not events:
                 logger.debug("[mood_agent] 无情绪事件，跳过分析 user_id=%s", user_id)
                 return
 
+            from backend.services.memory_store import memory_store
+            identity = await memory_store.identity(session_id,user_id)
+            suppressed = {e['source_id'] for e in await memory_store.exclusions(identity) if e['source_id']}
+            events = [e for e in events if (e.get('payload') or {}).get('source_message_id') not in suppressed]
+            if not events:
+                return
             result = aggregate_mood_by_rules(events)
             if result is None:
                 result = await self._llm_deep_analysis(user_id, session_id)
@@ -151,10 +157,13 @@ class MoodAgent:
                 }
             )
 
-            await memory_service.merge_user_profile(
-                user_id,
-                {"mood_tendency": result["mood_tendency"]}
-            )
+            from backend.services.memory_store import memory_store, now
+            from backend.database import get_db
+            identity = await memory_store.identity(session_id,user_id)
+            async with get_db() as db:
+                await db.execute('INSERT OR REPLACE INTO pet_mood_snapshots VALUES(?,?,?,?)',
+                                 (user_id,identity['pet_key'],result['mood_tendency'],now()))
+                await db.commit()
             logger.info(
                 "[mood_agent] 趋势已更新 user_id=%s source=%s: mood=%s | dominant_emotion=%s | dominant_need=%s",
                 user_id, result.get("analysis_source"), result["mood_tendency"],
@@ -184,7 +193,7 @@ class MoodAgent:
         async with get_db() as db:
             cursor = await db.execute(
                 """
-                SELECT content FROM messages
+                SELECT message_id,content FROM messages
                 WHERE session_id = ? AND role = 'user'
                 ORDER BY created_at DESC
                 LIMIT 15
@@ -199,8 +208,13 @@ class MoodAgent:
 
         # 按时间正序排列（fetchall 返回的是倒序），并对每条消息做 prompt 注入过滤
         sanitized_messages = []
+        from backend.services.memory_store import memory_store
+        identity = await memory_store.identity(session_id,user_id)
+        exclusions = await memory_store.exclusions(identity)
         for row in reversed(rows):
             msg = row["content"] or ""
+            if memory_store.redacted(msg,row['message_id'],exclusions)!=msg:
+                continue
             sanitized = _sanitize_prompt_input(msg)
             sanitized_messages.append(sanitized)
 

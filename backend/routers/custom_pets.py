@@ -382,6 +382,11 @@ async def delete_custom_pet(pet_id: str, request: Request):
         if session_ids:
             placeholders = ",".join(["?" for _ in session_ids])
 
+            from backend.services.memory_store import memory_store
+            await memory_store.purge_pet(db,user_id,'custom:'+pet_id)
+            for table in ('memory_jobs','memory_message_order','conversation_checkpoints'):
+                await db.execute(f'DELETE FROM {table} WHERE session_id IN ({placeholders})',session_ids)
+
             await db.execute(
                 f"DELETE FROM messages WHERE session_id IN ({placeholders})",
                 session_ids

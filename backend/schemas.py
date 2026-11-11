@@ -47,11 +47,13 @@ class MessageResponse(BaseModel):
     emotion_tag: Optional[str] = None
     is_proactive: bool = False
     created_at: datetime
+    seq: Optional[int] = None
 
 
 class MessageListResponse(BaseModel):
     messages: List[MessageResponse]
     total: int
+    next_cursor: Optional[int] = None
 
 
 class SimulateTimeRequest(BaseModel):
@@ -71,6 +73,14 @@ class MemoryPanelResponse(BaseModel):
     long_term_memories: List[dict]
     recent_messages_count: int
     user_profile: dict
+    memories: List[dict] = Field(default_factory=list)
+    next_cursor: Optional[int] = None
+
+
+class MemoryEditRequest(BaseModel):
+    value: Optional[str] = Field(None, min_length=1, max_length=4000)
+    scope: Optional[Literal['user', 'pet']] = None
+    pinned: Optional[bool] = None
 
 
 class PetStatusResponse(BaseModel):

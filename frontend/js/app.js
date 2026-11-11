@@ -724,9 +724,89 @@ class ChatApp {
                     el.textContent = formatProfileValue(profile[field]);
                 }
             });
+            await this.loadMemoryEntries();
         } catch (error) {
             console.error('加载记忆面板失败:', error);
         }
+    }
+
+    async loadMemoryEntries(append = false) {
+        const list = document.getElementById('memory-entries');
+        if (!list) return;
+        const history = document.getElementById('memory-history');
+        history.onchange = () => this.loadMemoryEntries().catch(error => this.showNotification(error.message));
+        const page = await API.getMemories(this.sessionId, {
+            before: append ? this.memoryCursor : null, history: history.checked
+        });
+        if (!append) list.replaceChildren();
+        if (!page.items.length && !append) {
+            const hint = document.createElement('p');
+            hint.className = 'empty-hint';
+            hint.textContent = '还没有长期记忆。聊到的明确事实和重要经历会逐步记录在这里。';
+            list.append(hint);
+        }
+        for (const memory of page.items) {
+            const card = document.createElement('article');
+            card.className = 'memory-entry';
+            const meta = document.createElement('p');
+            meta.className = 'memory-entry-meta';
+            meta.textContent = `${memory.scope === 'user' ? '共享基础资料' : '当前宠物'} · ${memory.status === 'active' ? '当前有效' : '历史记录'} · ${new Date(memory.valid_from).toLocaleDateString('zh-CN')}`;
+            const content = document.createElement('p');
+            content.className = 'memory-entry-content';
+            content.textContent = memory.content;
+            const actions = document.createElement('div');
+            actions.className = 'memory-entry-actions';
+            const button = (label, handler) => {
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.textContent = label;
+                el.onclick = async () => {
+                    el.disabled = true;
+                    try { await handler(); } catch (error) { this.showNotification(error.message); }
+                    finally { el.disabled = false; }
+                };
+                actions.append(el);
+                return el;
+            };
+            button('来源', async () => {
+                const detail = await API.memoryAction(this.sessionId, memory.memory_id);
+                let sources = card.querySelector('.memory-entry-sources');
+                if (sources) { sources.remove(); return; }
+                sources = document.createElement('div');
+                sources.className = 'memory-entry-sources';
+                sources.textContent = detail.sources.map(source => `${source.speaker === 'user' ? '用户原话' : source.source_type === 'manual' ? '手动编辑' : '历史记录'}：${source.evidence}`).join('\n') || '旧版本记忆，缺少可核实的原话来源。';
+                card.append(sources);
+            });
+            button('纠正', async () => {
+                const value = window.prompt('修改这条记忆：', memory.value);
+                if (value === null || !value.trim()) return;
+                await API.memoryAction(this.sessionId, memory.memory_id, 'PATCH', { value: value.trim() });
+                await this.loadMemoryPanel();
+            });
+            const share = button(memory.scope === 'user' ? '设为私有' : '设为共享', async () => {
+                await API.memoryAction(this.sessionId, memory.memory_id, 'PATCH', { scope: memory.scope === 'user' ? 'pet' : 'user' });
+                await this.loadMemoryPanel();
+            });
+            if (memory.scope !== 'user' && (!['current_city', 'identity', 'occupation', 'interest', 'avoidance', 'preferred_name'].includes(memory.predicate) || memory.sensitivity !== 'low')) {
+                share.disabled = true;
+                share.title = '仅低敏基础资料可以共享';
+            }
+            button(memory.pinned ? '取消重要' : '标为重要', async () => {
+                await API.memoryAction(this.sessionId, memory.memory_id, 'PATCH', { pinned: !memory.pinned });
+                await this.loadMemoryEntries();
+            });
+            button('遗忘', async () => {
+                if (!window.confirm('让宠物遗忘这条记忆？聊天原文与备份仍会保留。')) return;
+                await API.memoryAction(this.sessionId, memory.memory_id, 'DELETE');
+                await this.loadMemoryPanel();
+            });
+            card.append(meta, content, actions);
+            list.append(card);
+        }
+        this.memoryCursor = page.next_cursor;
+        const more = document.getElementById('memory-more');
+        more.hidden = !page.next_cursor;
+        more.onclick = () => this.loadMemoryEntries(true).catch(error => this.showNotification(error.message));
     }
 
     editProfile(field) {
@@ -789,23 +869,9 @@ class ChatApp {
         const actionsEl = document.getElementById(`actions-${field}`);
         
         try {
-            // 收集所有画像字段
-            const profileFields = ['region', 'identity', 'interests', 'occupation', 'personality_hint', 'active_hours', 'mood_tendency', 'extra_info'];
-            const currentProfile = {};
-            profileFields.forEach(f => {
-                const el = document.getElementById(`profile-${f}`);
-                if (el) {
-                    currentProfile[f] = el.textContent;
-                }
-            });
-            
-            // 更新当前编辑字段的值
-            currentProfile[field] = finalValue;
-            
-            console.log('保存用户画像:', currentProfile);
-            
-            await API.updateUserProfile(this.sessionId, currentProfile);
-            
+            // Send only the edited field so a stale panel cannot overwrite another update.
+            await API.updateUserProfile(this.sessionId, { [field]: finalValue });
+
             // 更新显示值
             valueEl.textContent = finalValue;
             delete valueEl.dataset.original;

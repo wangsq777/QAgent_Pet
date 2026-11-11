@@ -114,6 +114,27 @@ const API = {
         return await response.json();
     },
 
+    async getMemories(sessionId, { before = null, history = false } = {}) {
+        const query = new URLSearchParams({ history: String(history) });
+        if (before) query.set('before', before);
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/memories?${query}`, { headers: buildHeaders() });
+        if (!response.ok) throw new Error('加载记忆失败');
+        return response.json();
+    },
+
+    async memoryAction(sessionId, memoryId, method = 'GET', changes = null) {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/memories/${encodeURIComponent(memoryId)}`, {
+            method,
+            headers: buildHeaders(changes ? { 'Content-Type': 'application/json' } : {}),
+            ...(changes ? { body: JSON.stringify(changes) } : {})
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '记忆操作失败');
+        }
+        return response.json();
+    },
+
     async getPetStatus(sessionId) {
         const response = await fetch(`${API_BASE}/sessions/${sessionId}/pet-status`, {
             headers: buildHeaders()

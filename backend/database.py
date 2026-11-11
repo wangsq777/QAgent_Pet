@@ -74,7 +74,7 @@ def migrate_legacy_database(target_path: str, legacy_path: str = "") -> bool:
     return True
 
 
-def create_periodic_backup(database_path: str, backup_dir: str = "", keep: int = 5) -> str:
+def create_periodic_backup(database_path: str, backup_dir: str = "", keep: int = 5, force: bool = False) -> str:
     """Create at most one consistent backup per day and prune older copies."""
     if database_path == ":memory:":
         return ""
@@ -88,10 +88,11 @@ def create_periodic_backup(database_path: str, backup_dir: str = "", keep: int =
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     today_prefix = f"qagent_pet-{datetime.now().strftime('%Y%m%d')}"
-    if any(destination_dir.glob(f"{today_prefix}-*.db")):
+    if not force and any(destination_dir.glob(f"{today_prefix}-*.db")):
         return ""
 
-    destination = destination_dir / f"{today_prefix}-{datetime.now().strftime('%H%M%S')}.db"
+    suffix = '-memory-v2' if force else ''
+    destination = destination_dir / f"{today_prefix}-{datetime.now().strftime('%H%M%S')}{suffix}.db"
     source_db = sqlite3.connect(str(source))
     backup_db = sqlite3.connect(str(destination))
     try:
@@ -219,7 +220,14 @@ async def _migrate_proactive_events_sources(db) -> None:
 async def init_database():
     _ensure_database_parent()
     migrate_legacy_database(DATABASE_PATH)
-    create_periodic_backup(DATABASE_PATH)
+    needs_memory_migration = False
+    if DATABASE_PATH != ':memory:' and Path(DATABASE_PATH).is_file():
+        with sqlite3.connect(DATABASE_PATH) as legacy_db:
+            try:
+                needs_memory_migration = not legacy_db.execute("SELECT value FROM memory_meta WHERE key='schema_v2'").fetchone()
+            except sqlite3.OperationalError:
+                needs_memory_migration = True
+    create_periodic_backup(DATABASE_PATH,force=needs_memory_migration)
     async with aiosqlite.connect(DATABASE_PATH) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
@@ -707,6 +715,8 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_learning_messages_chapter_id ON learning_messages(chapter_id)
         """)
 
+        from backend.services.memory_schema import init_memory_schema
+        await init_memory_schema(db)
         await db.commit()
 
     # 数据库初始化完成后设置文件权限

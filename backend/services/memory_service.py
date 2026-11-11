@@ -38,17 +38,17 @@ class MemoryService:
     def __init__(self):
         # 画像内存缓存（写穿）：get_user_profile 每轮被调多次，写库后立即刷新
         self._profile_cache: Dict[str, Dict] = {}
-    async def get_short_term_messages(self, session_id: str, limit: int = 10) -> List[MessageResponse]:
+    async def get_short_term_messages(self, session_id: str, limit: int = 10, before: Optional[int] = None) -> List[MessageResponse]:
         async with get_db() as db:
             cursor = await db.execute(
                 """
-                SELECT message_id, role, content, emotion_tag, is_proactive, created_at 
-                FROM messages 
-                WHERE session_id = ? 
-                ORDER BY created_at DESC 
+                SELECT m.message_id, m.role, m.content, m.emotion_tag, m.is_proactive, m.created_at, o.seq
+                FROM messages m JOIN memory_message_order o USING(message_id)
+                WHERE m.session_id = ? AND (? IS NULL OR o.seq < ?)
+                ORDER BY o.seq DESC
                 LIMIT ?
                 """,
-                (session_id, limit)
+                (session_id, before, before, limit)
             )
             rows = await cursor.fetchall()
             return [MessageResponse(**dict(row)) for row in reversed(rows)]
@@ -75,6 +75,12 @@ class MemoryService:
                 (message_id, session_id, role, content, emotion_tag, is_proactive,
                  emotional_need, emotion_intensity, risk_level, datetime.now())
             )
+            await db.execute('INSERT INTO memory_message_order(message_id,session_id) VALUES(?,?)',
+                             (message_id,session_id))
+            if role == 'user':
+                from backend.services.memory_store import now
+                await db.execute("INSERT OR IGNORE INTO memory_jobs(job_id,source_id,session_id,job_type,available_at) "
+                                 "VALUES(?,?,?,'extract',?)",('extract:'+message_id,message_id,session_id,now()))
             await db.commit()
         return message_id
 
@@ -98,14 +104,16 @@ class MemoryService:
 
         memory_id = str(uuid.uuid4())
         conversation_for_compress = [
-            {"role": getattr(m, "role", m.get("role")), "content": getattr(m, "content", m.get("content"))}
-            for m in messages[:15]
+            {"role": m["role"] if isinstance(m, dict) else m.role,
+             "content": m["content"] if isinstance(m, dict) else m.content}
+            for m in messages
         ]
 
         compressed = await llm_service.compress_memory(conversation_for_compress, pet_name)
         summary = compressed["summary"]
         importance = compressed.get("importance", 0.5)
-        source_range = f"轮次1-{min(len(messages), 15)}"
+        source_range = "messages:" + ",".join(
+            str(m.get('message_id','unknown') if isinstance(m,dict) else m.message_id) for m in messages)
 
         async with get_db() as db:
             await db.execute(
@@ -159,25 +167,19 @@ class MemoryService:
         return False
 
     async def should_compress(self, session_id: str, recent_messages: List[Dict], current_message: str) -> bool:
-        """判断是否需要触发长期记忆压缩"""
-        message_count = await self.get_message_count(session_id)
-
-        # 条件1: 兜底机制 - 每 20 轮
-        if message_count > 20 and message_count % 20 == 0:
-            return True
-
-        # 条件2: 滑动窗口外消息积压 > 30 条
-        short_term = await self.get_short_term_messages(session_id, limit=10)
-        if message_count - len(short_term) > 30:
-            return True
-
-        # 条件3: 话题变化检测
-        if len(recent_messages) >= 3:
-            topic_changed = await self.detect_topic_change(recent_messages, current_message)
-            if topic_changed:
-                return True
-
-        return False
+        """Compatibility probe: use the same budget and checkpoint as the V2 worker."""
+        from backend.config import settings
+        from backend.services.memory_store import memory_store
+        from backend.services.memory_context import context_builder
+        identity = await memory_store.identity(session_id)
+        recent = await context_builder.recent(identity,settings.MEMORY_SHORT_TOKENS//2)
+        if not recent:
+            return False
+        async with get_db() as db:
+            row = await (await db.execute('SELECT 1 FROM memory_message_order WHERE session_id=? AND seq<? '
+                'AND seq>COALESCE((SELECT through_seq FROM conversation_checkpoints WHERE session_id=?),0) LIMIT 1',
+                (session_id,recent[0]['seq'],session_id))).fetchone()
+        return row is not None
 
     async def get_long_term_memories(self, session_id: str) -> List[Dict]:
         async with get_db() as db:
